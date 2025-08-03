@@ -28,16 +28,17 @@ class BinanceAPI:
         self.request_delay = 0.1  # Rate limiting delay
         
     async def __aenter__(self):
-        # Create SSL context that's more permissive
+        # Create SSL context with better security settings
         ssl_context = ssl.create_default_context()
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
+        # Only disable SSL verification if absolutely necessary
+        # ssl_context.check_hostname = False
+        # ssl_context.verify_mode = ssl.CERT_NONE
         
         # Connection timeout and retry settings
         timeout = aiohttp.ClientTimeout(
-            total=30,
-            connect=10,
-            sock_read=10
+            total=20,  # Reduced from 30
+            connect=8,  # Reduced from 10
+            sock_read=8  # Reduced from 10
         )
         
         # Connection pool settings
@@ -46,7 +47,10 @@ class BinanceAPI:
             limit=10,
             limit_per_host=5,
             enable_cleanup_closed=True,
-            force_close=False  # Fixed: Cannot use keepalive_timeout with force_close=True
+            force_close=False,
+            keepalive_timeout=30,
+            resolver=aiohttp.resolver.DefaultResolver(),
+            use_dns_cache=True
         )
         
         self.session = aiohttp.ClientSession(
@@ -55,7 +59,8 @@ class BinanceAPI:
             headers={
                 'User-Agent': 'crypto-ai-analyzer/1.0',
                 'Accept': 'application/json',
-                'Connection': 'keep-alive'
+                'Connection': 'keep-alive',
+                'Accept-Encoding': 'gzip, deflate'
             }
         )
         return self
@@ -78,6 +83,8 @@ class BinanceAPI:
                     # Rate limiting
                     await asyncio.sleep(self.request_delay)
                     
+                    self.logger.debug(f"Attempting request to {full_url} (attempt {attempt + 1})")
+                    
                     async with self.session.get(full_url, params=params or {}) as response:
                         if response.status == 200:
                             data = await response.json()
@@ -88,30 +95,41 @@ class BinanceAPI:
                             return data
                         elif response.status == 429:  # Rate limit
                             self.logger.warning(f"Rate limited by Binance (attempt {attempt + 1})")
-                            await asyncio.sleep(1 * (attempt + 1))  # Exponential backoff
+                            await asyncio.sleep(2 * (attempt + 1))  # Exponential backoff
                             continue
                         elif response.status >= 500:  # Server error
                             self.logger.warning(f"Binance server error {response.status} (attempt {attempt + 1})")
-                            await asyncio.sleep(0.5 * (attempt + 1))
+                            await asyncio.sleep(1 * (attempt + 1))
                             continue
+                        elif response.status == 403:  # Forbidden - IP ban or API key issue
+                            self.logger.error(f"Binance API forbidden (403): IP banned or API key issue")
+                            break
+                        elif response.status == 418:  # I'm a teapot - IP auto-banned
+                            self.logger.error(f"Binance IP auto-banned (418)")
+                            break
                         else:
-                            self.logger.error(f"Binance API error: {response.status}")
+                            error_text = await response.text()
+                            self.logger.error(f"Binance API error: {response.status} - {error_text}")
                             break
                             
                 except asyncio.TimeoutError:
                     self.logger.warning(f"Timeout connecting to {base_url} (attempt {attempt + 1})")
                     await asyncio.sleep(1 * (attempt + 1))
                     
-                except aiohttp.ClientConnectionError as e:
+                except aiohttp.ClientConnectorError as e:
                     self.logger.warning(f"Connection error to {base_url} (attempt {attempt + 1}): {e}")
                     await asyncio.sleep(1 * (attempt + 1))
                     
+                except aiohttp.ServerDisconnectedError:
+                    self.logger.warning(f"Server disconnected from {base_url} (attempt {attempt + 1})")
+                    await asyncio.sleep(1 * (attempt + 1))
+                    
                 except Exception as e:
-                    self.logger.error(f"Unexpected error with {base_url} (attempt {attempt + 1}): {e}")
+                    self.logger.error(f"Unexpected error with {base_url} (attempt {attempt + 1}): {type(e).__name__}: {e}")
                     await asyncio.sleep(1 * (attempt + 1))
         
         # All URLs and retries failed
-        self.logger.error("All Binance API endpoints failed")
+        self.logger.error("All Binance API endpoints failed after all retries")
         return {}
 
     async def get_ticker_24h(self, symbol: str = None) -> Dict:
@@ -270,21 +288,34 @@ class BinanceAPI:
             return {}
             
     async def test_connection(self) -> bool:
-        """Test connection to Binance API."""
+        """Test connection to Binance API with detailed diagnostics."""
         try:
+            self.logger.info(f"Testing Binance API connection to {self.current_url}")
+            
+            # Test with ping endpoint first
             endpoint = "/ping"
             data = await self._make_request(endpoint)
-            success = bool(data)  # Ping returns empty dict if successful
             
-            if success:
-                self.logger.info(f"Binance API connection successful via {self.current_url}")
-            else:
-                self.logger.warning("Binance API connection failed")
+            if data == {}:  # Ping returns empty dict if successful
+                self.logger.info(f"✅ Binance API ping successful via {self.current_url}")
                 
-            return success
+                # Test with server time endpoint for additional validation
+                time_endpoint = "/time"
+                time_data = await self._make_request(time_endpoint)
+                
+                if time_data and 'serverTime' in time_data:
+                    server_time = datetime.fromtimestamp(time_data['serverTime'] / 1000)
+                    self.logger.info(f"✅ Binance server time: {server_time}")
+                    return True
+                else:
+                    self.logger.warning("⚠️ Ping successful but server time failed")
+                    return True  # Ping worked, so connection is OK
+            else:
+                self.logger.warning(f"❌ Binance API ping failed - unexpected response: {data}")
+                return False
                 
         except Exception as e:
-            self.logger.error(f"Connection test failed: {e}")
+            self.logger.error(f"❌ Binance connection test failed: {type(e).__name__}: {e}")
             return False
 
     async def get_exchange_info(self) -> Dict:

@@ -14,8 +14,8 @@ from datetime import datetime
 
 # Add current directory to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-import config
+    
+        import config
 
 async def test_data_sources():
     """Test data source availability."""
@@ -34,7 +34,7 @@ async def test_data_sources():
                 print(f"   - {symbol}: ${data.get('price', 'N/A')}")
         else:
             print("❌ No market data available")
-            
+        
     except Exception as e:
         print(f"❌ Data source error: {e}")
 
@@ -59,7 +59,7 @@ async def test_rule_engine():
             print(f"✅ Rule signal: {signal['action']} (confidence: {signal['confidence']:.2f})")
         else:
             print("❌ No rule signal generated")
-            
+        
     except Exception as e:
         print(f"❌ Rule engine error: {e}")
 
@@ -73,13 +73,13 @@ async def test_telegram_bot():
         
         if telegram_bot.enabled:
             print("✅ Telegram bot initialized")
-            
+        
             # Test Turkish signals generation
             turkish_signals = await telegram_bot.get_turkish_signals()
             if turkish_signals:
                 print("✅ Turkish signals generated")
                 print(f"   Signal length: {len(turkish_signals)} characters")
-                
+        
                 # Check if cached
                 cache_file = f"{config.DATA_DIR}/turkish_signals.json"
                 if os.path.exists(cache_file):
@@ -90,7 +90,7 @@ async def test_telegram_bot():
                 print("❌ No Turkish signals generated")
         else:
             print("⚠️ Telegram bot not enabled (missing config)")
-            
+        
     except Exception as e:
         print(f"❌ Telegram bot error: {e}")
 
@@ -117,7 +117,7 @@ async def test_ai_integration():
             print("❌ No AI API keys configured")
         else:
             print("✅ At least one AI model available")
-            
+        
     except Exception as e:
         print(f"❌ AI integration error: {e}")
 
@@ -149,7 +149,7 @@ def test_flask_app():
                     print(f"⚠️ {name}: HTTP {response.status_code}")
             except Exception as e:
                 print(f"❌ {name}: {e}")
-                
+        
     except Exception as e:
         print(f"❌ Flask app error: {e}")
 
@@ -169,7 +169,7 @@ def test_render_readiness():
     for file in required_files:
         if os.path.exists(file):
             print(f"✅ {file} exists")
-        else:
+            else:
             print(f"❌ {file} missing")
     
     # Check environment variables

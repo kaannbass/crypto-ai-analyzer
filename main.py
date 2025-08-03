@@ -2,13 +2,14 @@
 Main orchestrator for the crypto analysis and trading signal system.
 Handles time-based triggers and coordinates all system components.
 Enhanced with WebSocket real-time data integration and Telegram notifications.
-Render.com deployment ready with Flask web server.
+Cross-platform compatible deployment ready with Flask web server.
 """
 
 import asyncio
 import json
 import logging
 import os
+import platform
 import time
 import threading
 from datetime import datetime, timedelta
@@ -310,27 +311,54 @@ class CryptoAnalyzer:
             self.logger.error(f"Error loading existing data: {e}")
 
     async def get_market_data(self) -> Dict:
-        """Get LIVE market data ONLY - no fallback/mock data."""
+        """Get market data with improved fallback handling."""
         try:
-            # Import data manager for LIVE data only
+            # Import data manager
             from data_sources.data_manager import DataManager
             data_manager = DataManager()
             
-            # Force refresh to get LIVE data
+            # Force refresh to get fresh data
             live_data = await data_manager.get_market_data(config.SYMBOLS, force_refresh=True)
             
-            if live_data and len(live_data) >= 3:  # Must have at least 3 symbols
-                self.logger.info(f"✅ Retrieved LIVE market data for {len(live_data)} symbols")
+            if live_data and len(live_data) >= 1:  # Relaxed requirement: at least 1 symbol
+                self.logger.info(f"✅ Retrieved market data for {len(live_data)} symbols")
                 # Save to file for web endpoint
                 await self.save_market_data(live_data)
+                
+                # Check data quality
+                quality = self._assess_data_quality(live_data)
+                self.logger.info(f"📊 Data quality assessment: {quality}")
+                
                 return live_data
             else:
-                self.logger.error("❌ NO LIVE DATA AVAILABLE - Skipping analysis")
-                return {}  # Return empty dict if no live data
+                self.logger.error("❌ NO DATA AVAILABLE - All sources failed")
+                return {}
                 
         except Exception as e:
-            self.logger.error(f"❌ Error fetching LIVE market data: {e}")
-            return {}  # Return empty dict on error - NO FALLBACK
+            self.logger.error(f"❌ Error fetching market data: {e}")
+            return {}
+    
+    def _assess_data_quality(self, data: Dict) -> str:
+        """Assess the quality of market data."""
+        if not data:
+            return "NONE"
+        
+        total_symbols = len(config.SYMBOLS)
+        available_symbols = len(data)
+        coverage = available_symbols / total_symbols
+        
+        # Check for fallback or partial data
+        fallback_count = sum(1 for symbol_data in data.values() 
+                           if symbol_data.get('source') in ['fallback', 'binance_partial'])
+        
+        if fallback_count > 0:
+            return f"PARTIAL ({available_symbols}/{total_symbols} symbols, {fallback_count} fallback)"
+        elif coverage >= 0.8:
+            return f"GOOD ({available_symbols}/{total_symbols} symbols)"
+        elif coverage >= 0.5:
+            return f"FAIR ({available_symbols}/{total_symbols} symbols)"
+        else:
+            return f"POOR ({available_symbols}/{total_symbols} symbols)"
 
     async def save_market_data(self, market_data: Dict):
         """Save market data to file for web endpoints."""
@@ -409,23 +437,23 @@ class CryptoAnalyzer:
         return {}
             
     async def daily_analysis(self):
-        """Perform analysis with LIVE data only."""
-        self.logger.info("🔄 Starting analysis with LIVE DATA ONLY...")
+        """Perform analysis with improved data handling."""
+        self.logger.info("🔄 Starting analysis...")
         
         # Check if we can trade today
         if not self.risk_guard.can_trade_today():
             self.logger.info("Daily trading limits reached, skipping analysis")
             return
             
-        # Get LIVE market data ONLY
+        # Get market data (with fallback mechanisms)
         market_data = await self.get_market_data()
         
-        # If NO LIVE DATA, skip analysis completely
+        # If NO DATA AT ALL, skip analysis
         if not market_data:
-            self.logger.error("❌ NO LIVE DATA - Skipping all analysis")
+            self.logger.error("❌ NO DATA AVAILABLE - Skipping all analysis")
             return
         
-        self.logger.info(f"✅ Processing LIVE data for {len(market_data)} symbols")
+        self.logger.info(f"✅ Processing data for {len(market_data)} symbols")
         
         # Generate signals using rules with LIVE data
         rule_signals = []
@@ -458,7 +486,7 @@ class CryptoAnalyzer:
         return validated_signals
 
     async def hourly_telegram_update(self):
-        """Send Turkish signals to Telegram every hour with LIVE data only."""
+        """Send Turkish signals to Telegram every hour."""
         try:
             self.logger.info("📤 Sending hourly Telegram update...")
             
@@ -466,12 +494,12 @@ class CryptoAnalyzer:
                 self.logger.warning("Telegram notifier not available")
                 return
             
-            # Get LIVE market data
+            # Get market data (with fallback mechanisms)
             market_data = await self.get_market_data()
             
-            # If NO LIVE DATA, don't send anything
+            # If NO DATA AT ALL, don't send anything
             if not market_data:
-                self.logger.error("❌ NO LIVE DATA - Skipping Telegram update")
+                self.logger.error("❌ NO DATA - Skipping Telegram update")
                 return
                 
             # Generate Turkish signals with LIVE data

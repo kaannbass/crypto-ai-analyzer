@@ -1,6 +1,6 @@
-# Crypto AI Analyzer Dependencies - Render.com Ready
+# Crypto AI Analyzer Dependencies - Cross-platform Compatible
 
-# Web Framework for Render deployment
+# Web Framework for deployment
 Flask>=2.3.0
 gunicorn>=21.2.0
 
@@ -45,14 +45,11 @@ structlog>=23.1.0
 pytest>=7.4.0
 pytest-asyncio>=0.21.0
 
-# Production server
-uvicorn[standard]>=0.23.0
-
 # Security
 cryptography>=41.0.0
 
-# Rate limiting
+# Rate limiting (simplified)
 slowapi>=0.1.9
 
-# Caching
-redis>=5.0.0 
+# Simple production server (instead of uvicorn with problematic extensions)
+waitress>=2.1.0 

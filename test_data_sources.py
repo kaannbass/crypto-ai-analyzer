@@ -1,119 +1,257 @@
 #!/usr/bin/env python3
 """
-Test script for crypto data sources.
-Run this to verify that real crypto APIs are working.
+Enhanced data source testing with comprehensive diagnostics.
 """
 
 import asyncio
-import json
+import logging
+import sys
+import time
 from datetime import datetime
 
-import config
-from data_sources.data_manager import DataManager
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
-
-async def test_data_sources():
-    """Test all crypto data sources."""
-    print("🔍 Testing Crypto Data Sources...")
-    print("=" * 50)
+async def test_binance_connection():
+    """Comprehensive Binance API testing."""
+    logger.info("=" * 60)
+    logger.info("🔍 BINANCE API COMPREHENSIVE TEST")
+    logger.info("=" * 60)
     
-    data_manager = DataManager()
-    
-    # Test connectivity to all sources
-    print("📡 Testing API connectivity...")
-    connectivity = await data_manager.test_all_sources()
-    
-    for source, status in connectivity.items():
-        status_icon = "✅" if status else "❌"
-        print(f"{status_icon} {source.title()}: {'Connected' if status else 'Failed'}")
-    
-    print("\n📊 Fetching real market data...")
-    
-    # Get real market data
-    market_data = await data_manager.get_market_data(config.SYMBOLS)
-    
-    if market_data:
-        print(f"✅ Successfully retrieved data for {len(market_data)} symbols")
-        print("\n💰 Current Prices:")
+    try:
+        from data_sources.binance_api import BinanceAPI, test_binance_connection
         
-        for symbol, data in market_data.items():
-            price = data.get('price', 0)
-            change_24h = data.get('change_24h', 0)
-            volume = data.get('volume', 0)
-            source = data.get('source', 'unknown')
-            
-            change_icon = "🔺" if change_24h > 0 else "🔻" if change_24h < 0 else "➖"
-            
-            print(f"{change_icon} {symbol}: ${price:,.2f} ({change_24h:+.2%}) "
-                  f"Vol: ${volume:,.0f} [{source}]")
-                  
-        # Test historical data
-        print(f"\n📈 Testing historical data for {config.SYMBOLS[0]}...")
-        historical = await data_manager.get_historical_data(config.SYMBOLS[0], '1h', 24)
+        # Test 1: Basic connection test
+        logger.info("Test 1: Basic connection test...")
+        start_time = time.time()
+        connection_ok = await test_binance_connection()
+        elapsed = time.time() - start_time
         
-        if historical:
-            print(f"✅ Retrieved {len(historical)} historical data points")
-            
-            # Show recent price action
-            if len(historical) >= 3:
-                latest = historical[-1]
-                prev = historical[-2]
-                price_change = (latest['close'] - prev['close']) / prev['close']
-                
-                print(f"📊 Recent action: ${latest['close']:,.2f} ({price_change:+.2%} from previous hour)")
+        if connection_ok:
+            logger.info(f"✅ Basic connection test PASSED ({elapsed:.2f}s)")
         else:
-            print("❌ Could not retrieve historical data")
-            
-    else:
-        print("❌ No market data retrieved - check your internet connection")
+            logger.error(f"❌ Basic connection test FAILED ({elapsed:.2f}s)")
         
-    # Cache statistics
-    cache_stats = data_manager.get_cache_stats()
-    print(f"\n💾 Cache: {cache_stats['total_entries']} entries, "
-          f"{cache_stats['total_size_bytes']} bytes")
-    
-    print("\n" + "=" * 50)
-    print("📝 Test completed!")
-    
-    return market_data
-
-
-async def test_pump_detection():
-    """Test pump detection with real data."""
-    print("\n🚀 Testing Pump Detection...")
-    
-    from pump_scanner.pump_detector import PumpDetector
-    
-    pump_detector = PumpDetector()
-    pumps = await pump_detector.scan_for_pumps()
-    
-    if pumps:
-        print(f"🔥 Detected {len(pumps)} potential pumps:")
-        for pump in pumps:
-            symbol = pump.get('symbol')
-            pump_type = pump.get('pump_type')
-            confidence = pump.get('confidence', 0)
-            price_change = pump.get('price_change', 0)
+        # Test 2: Detailed API tests
+        logger.info("\nTest 2: Detailed API tests...")
+        async with BinanceAPI() as binance:
+            # Test ping
+            logger.info("  - Testing ping endpoint...")
+            ping_result = await binance.test_connection()
+            logger.info(f"    Ping result: {'✅ SUCCESS' if ping_result else '❌ FAILED'}")
             
-            print(f"  • {symbol}: {pump_type} pump ({confidence:.2f} confidence, "
-                  f"{price_change:+.2%} price change)")
-    else:
-        print("📊 No pumps detected at this time")
+            # Test server time
+            logger.info("  - Testing server time endpoint...")
+            time_data = await binance.get_server_time()
+            if time_data and 'serverTime' in time_data:
+                server_time = datetime.fromtimestamp(time_data['serverTime'] / 1000)
+                logger.info(f"    ✅ Server time: {server_time}")
+            else:
+                logger.error(f"    ❌ Server time failed: {time_data}")
+            
+            # Test exchange info
+            logger.info("  - Testing exchange info endpoint...")
+            exchange_info = await binance.get_exchange_info()
+            if exchange_info and 'symbols' in exchange_info:
+                symbol_count = len(exchange_info['symbols'])
+                logger.info(f"    ✅ Exchange info: {symbol_count} symbols available")
+            else:
+                logger.error(f"    ❌ Exchange info failed")
+            
+            # Test market data for key symbols
+            logger.info("  - Testing market data for key symbols...")
+            test_symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT']
+            market_data = await binance.get_market_data(test_symbols)
+            
+            if market_data:
+                logger.info(f"    ✅ Market data: Retrieved data for {len(market_data)} symbols")
+                for symbol, data in market_data.items():
+                    price = data.get('price', 0)
+                    logger.info(f"      {symbol}: ${price:,.2f}")
+            else:
+                logger.error(f"    ❌ Market data failed")
+        
+        return connection_ok
+        
+    except Exception as e:
+        logger.error(f"❌ Binance test failed with exception: {type(e).__name__}: {e}")
+        return False
 
+async def test_coingecko_connection():
+    """Comprehensive CoinGecko API testing."""
+    logger.info("=" * 60)
+    logger.info("🔍 COINGECKO API COMPREHENSIVE TEST")
+    logger.info("=" * 60)
+    
+    try:
+        from data_sources.coingecko_api import CoinGeckoAPI
+        
+        async with CoinGeckoAPI() as coingecko:
+            # Test 1: Basic connection test
+            logger.info("Test 1: Basic connection test...")
+            start_time = time.time()
+            connection_ok = await coingecko.test_connection()
+            elapsed = time.time() - start_time
+            
+            if connection_ok:
+                logger.info(f"✅ Basic connection test PASSED ({elapsed:.2f}s)")
+            else:
+                logger.error(f"❌ Basic connection test FAILED ({elapsed:.2f}s)")
+            
+            # Test 2: Price data test
+            logger.info("\nTest 2: Price data test...")
+            test_symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT']
+            price_data = await coingecko.get_current_prices(test_symbols)
+            
+            if price_data:
+                logger.info(f"✅ Price data: Retrieved data for {len(price_data)} symbols")
+                for symbol, data in price_data.items():
+                    price = data.get('price', 0)
+                    change = data.get('change_24h', 0)
+                    logger.info(f"    {symbol}: ${price:,.2f} ({change:+.2%})")
+            else:
+                logger.error("❌ Price data failed")
+            
+            # Test 3: Market data test
+            logger.info("\nTest 3: Market data test...")
+            market_data = await coingecko.get_market_data(test_symbols)
+            
+            if market_data:
+                logger.info(f"✅ Market data: Retrieved data for {len(market_data)} symbols")
+            else:
+                logger.error("❌ Market data failed")
+            
+            # Test 4: Trending coins test
+            logger.info("\nTest 4: Trending coins test...")
+            trending = await coingecko.get_trending_coins()
+            
+            if trending:
+                logger.info(f"✅ Trending coins: Retrieved {len(trending)} trending coins")
+            else:
+                logger.warning("⚠️ Trending coins failed (might be rate limited)")
+        
+        return connection_ok
+        
+    except Exception as e:
+        logger.error(f"❌ CoinGecko test failed with exception: {type(e).__name__}: {e}")
+        return False
+
+async def test_data_manager():
+    """Test the data manager with fallback mechanisms."""
+    logger.info("=" * 60)
+    logger.info("🔍 DATA MANAGER COMPREHENSIVE TEST")
+    logger.info("=" * 60)
+    
+    try:
+        from data_sources.data_manager import DataManager
+        import config
+        
+        data_manager = DataManager()
+        
+        # Test 1: Get market data with force refresh
+        logger.info("Test 1: Get market data with force refresh...")
+        start_time = time.time()
+        market_data = await data_manager.get_market_data(config.SYMBOLS, force_refresh=True)
+        elapsed = time.time() - start_time
+        
+        if market_data:
+            logger.info(f"✅ Market data retrieved ({elapsed:.2f}s)")
+            logger.info(f"    Symbols: {len(market_data)}/{len(config.SYMBOLS)}")
+            
+            # Check data sources
+            sources = {}
+            for symbol, data in market_data.items():
+                source = data.get('source', 'unknown')
+                sources[source] = sources.get(source, 0) + 1
+            
+            logger.info("    Data sources breakdown:")
+            for source, count in sources.items():
+                logger.info(f"      {source}: {count} symbols")
+        else:
+            logger.error(f"❌ Market data failed ({elapsed:.2f}s)")
+        
+        # Test 2: Test individual source connectivity
+        logger.info("\nTest 2: Test individual source connectivity...")
+        source_results = await data_manager.test_all_sources()
+        
+        for source, result in source_results.items():
+            status = "✅ ONLINE" if result else "❌ OFFLINE"
+            logger.info(f"    {source}: {status}")
+        
+        # Test 3: Cache statistics
+        logger.info("\nTest 3: Cache statistics...")
+        cache_stats = data_manager.get_cache_stats()
+        logger.info(f"    Cache entries: {cache_stats['total_entries']}")
+        logger.info(f"    Cache size: {cache_stats['total_size_bytes']} bytes")
+        logger.info(f"    Cache duration: {cache_stats['cache_duration_seconds']}s")
+        
+        return bool(market_data)
+        
+    except Exception as e:
+        logger.error(f"❌ Data manager test failed: {type(e).__name__}: {e}")
+        return False
+
+async def run_network_diagnostics():
+    """Run network diagnostics."""
+    logger.info("=" * 60)
+    logger.info("🔍 NETWORK DIAGNOSTICS")
+    logger.info("=" * 60)
+    
+    import aiohttp
+    import ssl
+    
+    # Test basic HTTP connectivity
+    test_urls = [
+        "https://api.binance.com/api/v3/ping",
+        "https://api.coingecko.com/api/v3/ping",
+        "https://httpbin.org/get"
+    ]
+    
+    async with aiohttp.ClientSession() as session:
+        for url in test_urls:
+            try:
+                start_time = time.time()
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                    elapsed = time.time() - start_time
+                    status = "✅ SUCCESS" if response.status == 200 else f"❌ HTTP {response.status}"
+                    logger.info(f"    {url}: {status} ({elapsed:.2f}s)")
+            except Exception as e:
+                elapsed = time.time() - start_time
+                logger.error(f"    {url}: ❌ FAILED - {type(e).__name__}: {e} ({elapsed:.2f}s)")
+
+async def main():
+    """Run comprehensive data source diagnostics."""
+    logger.info("🚀 Starting comprehensive data source diagnostics...")
+    logger.info(f"📅 Test started at: {datetime.now()}")
+    
+    # Run network diagnostics first
+    await run_network_diagnostics()
+    
+    # Test individual APIs
+    binance_ok = await test_binance_connection()
+    coingecko_ok = await test_coingecko_connection()
+    
+    # Test data manager
+    data_manager_ok = await test_data_manager()
+    
+    # Summary
+    logger.info("=" * 60)
+    logger.info("📊 DIAGNOSTIC SUMMARY")
+    logger.info("=" * 60)
+    logger.info(f"Binance API: {'✅ WORKING' if binance_ok else '❌ FAILING'}")
+    logger.info(f"CoinGecko API: {'✅ WORKING' if coingecko_ok else '❌ FAILING'}")
+    logger.info(f"Data Manager: {'✅ WORKING' if data_manager_ok else '❌ FAILING'}")
+    
+    if binance_ok or coingecko_ok:
+        logger.info("🎉 At least one data source is working!")
+    else:
+        logger.error("💥 All data sources are failing!")
+    
+    return binance_ok or coingecko_ok
 
 if __name__ == "__main__":
-    print("🔐 Crypto AI Analyzer - Data Source Test")
-    print("========================================\n")
-    
-    # Run the tests
-    market_data = asyncio.run(test_data_sources())
-    
-    if market_data:
-        asyncio.run(test_pump_detection())
-        
-        print("\n🎯 Next steps:")
-        print("1. Set OPENAI_API_KEY or CLAUDE_API_KEY environment variables for AI analysis")
-        print("2. Run 'python3 main.py' to start the full trading system")
-        print("3. Monitor signals in data/signals.json")
-    else:
-        print("\n⚠️  Fix connectivity issues before running the main system") 
+    asyncio.run(main()) 

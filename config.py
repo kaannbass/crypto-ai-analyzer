@@ -13,6 +13,10 @@ load_dotenv()
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
 CLAUDE_API_KEY = os.getenv('CLAUDE_API_KEY', '')
 
+# CoinGecko Pro API Configuration
+COINGECKO_API_KEY = os.getenv('COINGECKO_API_KEY', '')
+COINGECKO_PRO_ENABLED = bool(COINGECKO_API_KEY.strip())
+
 # Telegram Bot Configuration
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID', '')  # Optional: specific chat ID
