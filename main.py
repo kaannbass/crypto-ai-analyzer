@@ -2,6 +2,7 @@
 Main orchestrator for the crypto analysis and trading signal system.
 Handles time-based triggers and coordinates all system components.
 Enhanced with WebSocket real-time data integration and Telegram notifications.
+Render.com deployment ready with Flask web server.
 """
 
 import asyncio
@@ -9,8 +10,10 @@ import json
 import logging
 import os
 import time
+import threading
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
+from flask import Flask, jsonify, request
 
 import config
 from rules.rule_engine import RuleEngine
@@ -23,21 +26,231 @@ from binance_websocket_client import BinanceWebSocketClient
 
 # Import news API
 try:
-    from data_sources.news_api import get_crypto_news, NewsProcessor
+    from data_sources.news_api import CryptoNewsAPI
     NEWS_API_AVAILABLE = True
+    
+    class NewsProcessor:
+        """Simple news processor wrapper."""
+        async def get_crypto_news(self, limit=20):
+            async with CryptoNewsAPI() as news_api:
+                return await news_api.get_crypto_news(limit)
+        
+        def process_news_for_ai(self, news_data):
+            """Basic news processing."""
+            if not news_data:
+                return {"sentiment_summary": "neutral", "impact_level": "low", "key_themes": [], "total_articles": 0}
+            
+            # Simple sentiment analysis based on keywords
+            positive_keywords = ["surge", "rally", "bull", "gain", "rise", "up", "positive", "adoption"]
+            negative_keywords = ["drop", "fall", "crash", "bear", "down", "negative", "ban", "hack"]
+            
+            positive_count = 0
+            negative_count = 0
+            
+            for article in news_data:
+                title = article.get('title', '').lower()
+                for keyword in positive_keywords:
+                    if keyword in title:
+                        positive_count += 1
+                for keyword in negative_keywords:
+                    if keyword in title:
+                        negative_count += 1
+            
+            if positive_count > negative_count:
+                sentiment = "bullish"
+            elif negative_count > positive_count:
+                sentiment = "bearish"
+            else:
+                sentiment = "neutral"
+                
+            impact = "high" if len(news_data) > 15 else "medium" if len(news_data) > 5 else "low"
+            
+            return {
+                "sentiment_summary": sentiment,
+                "impact_level": impact,
+                "key_themes": ["crypto", "market", "trading"],
+                "total_articles": len(news_data)
+            }
+    
 except ImportError:
     NEWS_API_AVAILABLE = False
+    
+    class NewsProcessor:
+        async def get_crypto_news(self, limit=20):
+            return []
+        def process_news_for_ai(self, news_data):
+            return {"sentiment_summary": "neutral", "impact_level": "low", "key_themes": [], "total_articles": 0}
 
-# Import Telegram bot
+# Import Telegram bot with Turkish format
 try:
-    from telegram_bot_module import telegram_bot
+    from telegram_bot_module.telegram_bot import EnhancedTelegramNotifier
     TELEGRAM_AVAILABLE = True
 except ImportError:
     TELEGRAM_AVAILABLE = False
 
+# Flask app for Render.com
+app = Flask(__name__)
+
+# Global analyzer instance
+analyzer_instance = None
+
+@app.route('/')
+def home():
+    """Home endpoint for Render health check."""
+    return jsonify({
+        "status": "running",
+        "service": "Crypto AI Analyzer",
+        "version": "2.0.0",
+        "features": [
+            "Turkish Trading Signals",
+            "Real-time Market Data",
+            "AI Analysis (OpenAI + Claude)",
+            "Telegram Notifications",
+            "Risk Management",
+            "Pump Detection"
+        ],
+        "endpoints": [
+            "/health",
+            "/signals",
+            "/signals/turkish",
+            "/status",
+            "/market-data"
+        ]
+    })
+
+@app.route('/health')
+def health_check():
+    """Health check endpoint for Render."""
+    global analyzer_instance
+    status = {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "components": {
+            "analyzer": analyzer_instance is not None and analyzer_instance.running,
+            "telegram": TELEGRAM_AVAILABLE and config.TELEGRAM_ENABLED,
+            "news_api": NEWS_API_AVAILABLE,
+            "ai_models": bool(config.OPENAI_API_KEY or config.CLAUDE_API_KEY)
+        }
+    }
+    
+    # Check if all critical components are working
+    if all([status["components"]["analyzer"]]):
+        return jsonify(status), 200
+    else:
+        status["status"] = "degraded"
+        return jsonify(status), 503
+
+@app.route('/signals')
+def get_signals():
+    """Get latest trading signals (English format)."""
+    try:
+        global analyzer_instance
+        if not analyzer_instance:
+            return jsonify({"error": "Analyzer not initialized"}), 503
+            
+        # Get recent signals from file
+        signals = []
+        if os.path.exists(config.SIGNALS_FILE):
+            with open(config.SIGNALS_FILE, 'r') as f:
+                all_signals = json.load(f)
+                # Get last 5 signals
+                signals = all_signals[-5:] if all_signals else []
+        
+        return jsonify({
+            "signals": signals,
+            "count": len(signals),
+            "timestamp": datetime.utcnow().isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/signals/turkish')
+def get_turkish_signals():
+    """Get Turkish format trading signals."""
+    try:
+        global analyzer_instance
+        if not analyzer_instance or not analyzer_instance.telegram_notifier:
+            return jsonify({"error": "Telegram notifier not available"}), 503
+            
+        # Get Turkish signals synchronously (load from file)
+        # Since this is a Flask route, we can't use async directly
+        try:
+            # Try to get latest Turkish signals from cached file
+            turkish_file = f"{config.DATA_DIR}/turkish_signals.json"
+            if os.path.exists(turkish_file):
+                with open(turkish_file, 'r', encoding='utf-8') as f:
+                    cached_signals = json.load(f)
+                    return jsonify({
+                        "signals": cached_signals.get("content", "📊 Türkçe sinyaller yükleniyor..."),
+                        "format": "Turkish", 
+                        "timestamp": cached_signals.get("timestamp", datetime.utcnow().isoformat()),
+                        "cached": True
+                    })
+            else:
+                # Return a placeholder if no cached signals
+                return jsonify({
+                    "signals": "🔄 Türkçe sinyaller hazırlanıyor... Lütfen birkaç dakika sonra tekrar deneyin.",
+                    "format": "Turkish",
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "cached": False
+                })
+        except Exception as e:
+            return jsonify({"error": f"Cache read error: {str(e)}"}), 500
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/status')
+def get_status():
+    """Get system status."""
+    global analyzer_instance
+    
+    status = {
+        "system": {
+            "running": analyzer_instance is not None and analyzer_instance.running,
+            "uptime": time.time() - analyzer_instance.start_time if analyzer_instance else 0,
+            "symbols_monitored": len(config.SYMBOLS)
+        },
+        "data_sources": {
+            "binance_api": True,  # Always try Binance
+            "coingecko_api": True,  # Fallback
+            "news_api": NEWS_API_AVAILABLE,
+            "websocket": analyzer_instance.websocket_client is not None if analyzer_instance else False
+        },
+        "ai_models": {
+            "openai": bool(config.OPENAI_API_KEY),
+            "claude": bool(config.CLAUDE_API_KEY)
+        },
+        "notifications": {
+            "telegram_enabled": TELEGRAM_AVAILABLE and config.TELEGRAM_ENABLED,
+            "telegram_configured": bool(config.TELEGRAM_BOT_TOKEN)
+        }
+    }
+    
+    return jsonify(status)
+
+@app.route('/market-data')
+def get_market_data():
+    """Get current market data."""
+    try:
+        # Load latest market data from file if available
+        if os.path.exists(f"{config.DATA_DIR}/prices.json"):
+            with open(f"{config.DATA_DIR}/prices.json", 'r') as f:
+                market_data = json.load(f)
+                return jsonify({
+                    "market_data": market_data,
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+        else:
+            return jsonify({"error": "No market data available"}), 404
+            
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 class CryptoAnalyzer:
     def __init__(self):
+        self.start_time = time.time()
         self.setup_logging()
         self.rule_engine = RuleEngine()
         self.risk_guard = RiskGuard()
@@ -52,6 +265,9 @@ class CryptoAnalyzer:
         
         # News processor
         self.news_processor = NewsProcessor() if NEWS_API_AVAILABLE else None
+        
+        # Telegram notifier with Turkish format
+        self.telegram_notifier = EnhancedTelegramNotifier() if TELEGRAM_AVAILABLE else None
         
         self.ensure_data_directory()
         self.load_existing_data()
@@ -105,6 +321,8 @@ class CryptoAnalyzer:
             
             if real_data:
                 self.logger.info(f"Retrieved real market data for {len(real_data)} symbols")
+                # Save to file for web endpoint
+                await self.save_market_data(real_data)
                 return real_data
             else:
                 self.logger.warning("No real market data available, using fallback")
@@ -114,14 +332,30 @@ class CryptoAnalyzer:
             self.logger.error(f"Error fetching real market data: {e}")
             return self.get_fallback_data()
 
+    async def save_market_data(self, market_data: Dict):
+        """Save market data to file for web endpoints."""
+        try:
+            prices_file = f"{config.DATA_DIR}/prices.json"
+            market_data_with_timestamp = {
+                **market_data,
+                "_timestamp": datetime.utcnow().isoformat(),
+                "_count": len(market_data)
+            }
+            
+            with open(prices_file, 'w') as f:
+                json.dump(market_data_with_timestamp, f, indent=2)
+                
+        except Exception as e:
+            self.logger.error(f"Error saving market data: {e}")
+
     async def get_crypto_news_data(self, limit: int = 20) -> List[Dict]:
         """Get latest crypto news."""
-        if not NEWS_API_AVAILABLE:
+        if not NEWS_API_AVAILABLE or not self.news_processor:
             self.logger.warning("News API not available")
             return []
             
         try:
-            news_data = await get_crypto_news(limit=limit)
+            news_data = await self.news_processor.get_crypto_news(limit=limit)
             self.logger.info(f"Retrieved {len(news_data)} news articles")
             
             # Save news data
@@ -184,7 +418,7 @@ class CryptoAnalyzer:
         return {}
             
     async def daily_analysis(self):
-        """Perform daily analysis at 08:00 UTC."""
+        """Perform daily analysis at 08:00 UTC with Turkish signals."""
         self.logger.info("Starting daily analysis...")
         
         # Check if we can trade today
@@ -221,13 +455,23 @@ class CryptoAnalyzer:
             if self.risk_guard.validate_signal(signal):
                 validated_signals.append(signal)
                 self.save_signal(signal)
+        
+        # Send Turkish format signals to Telegram and cache them
+        if self.telegram_notifier:
+            try:
+                if validated_signals:
+                    # Send Turkish format signals
+                    await self.telegram_notifier.send_turkish_trading_signal(validated_signals[0])
+                    
+                    # Send daily summary
+                    stats = self.calculate_daily_stats(validated_signals)
+                    await self.telegram_notifier.send_daily_summary(stats)
                 
-                # Send signal to Telegram
-                if TELEGRAM_AVAILABLE:
-                    try:
-                        await telegram_bot.send_signal(signal)
-                    except Exception as e:
-                        self.logger.error(f"Failed to send signal to Telegram: {e}")
+                # Always generate and cache Turkish signals for web endpoint
+                await self.telegram_notifier.get_turkish_signals()
+                
+            except Exception as e:
+                self.logger.error(f"Failed to send Turkish signals to Telegram: {e}")
                 
         self.logger.info(f"Daily analysis complete. Generated {len(validated_signals)} signals")
 
@@ -235,7 +479,7 @@ class CryptoAnalyzer:
         if TELEGRAM_AVAILABLE and validated_signals:
             try:
                 stats = self.calculate_daily_stats(validated_signals)
-                await telegram_bot.send_daily_summary(stats)
+                await self.telegram_notifier.send_daily_summary(stats)
             except Exception as e:
                 self.logger.error(f"Failed to send daily summary to Telegram: {e}")
 
@@ -280,7 +524,7 @@ class CryptoAnalyzer:
                     # Send signal to Telegram
                     if TELEGRAM_AVAILABLE:
                         try:
-                            await telegram_bot.send_signal(enhanced_signal)
+                            await self.telegram_notifier.send_turkish_trading_signal(enhanced_signal)
                         except Exception as e:
                             self.logger.error(f"Failed to send macro signal to Telegram: {e}")
             
@@ -302,7 +546,7 @@ class CryptoAnalyzer:
             # Send macro analysis to Telegram
             if TELEGRAM_AVAILABLE:
                 try:
-                    await telegram_bot.send_macro_analysis(macro_analysis)
+                    await self.telegram_notifier.send_macro_analysis(macro_analysis)
                 except Exception as e:
                     self.logger.error(f"Failed to send macro analysis to Telegram: {e}")
             
@@ -313,7 +557,7 @@ class CryptoAnalyzer:
             # Send error to Telegram
             if TELEGRAM_AVAILABLE:
                 try:
-                    await telegram_bot.send_error(str(e), "Macro Analysis")
+                    await self.telegram_notifier.send_error_notification(str(e), "Macro Analysis")
                 except:
                     pass
             return None
@@ -343,7 +587,7 @@ class CryptoAnalyzer:
                 # Send news update to Telegram
                 if TELEGRAM_AVAILABLE:
                     try:
-                        await telegram_bot.send_news(news_data)
+                        await self.telegram_notifier.send_news(news_data)
                     except Exception as e:
                         self.logger.error(f"Failed to send news to Telegram: {e}")
                 
@@ -360,7 +604,7 @@ class CryptoAnalyzer:
             # Send error to Telegram
             if TELEGRAM_AVAILABLE:
                 try:
-                    await telegram_bot.send_error(str(e), "News Analysis")
+                    await self.telegram_notifier.send_error_notification(str(e), "News Analysis")
                 except:
                     pass
         
@@ -382,7 +626,7 @@ class CryptoAnalyzer:
                         # Send anomaly alert to Telegram
                         if TELEGRAM_AVAILABLE:
                             try:
-                                await telegram_bot.send_anomaly(anomaly)
+                                await self.telegram_notifier.send_anomaly(anomaly)
                             except Exception as e:
                                 self.logger.error(f"Failed to send anomaly to Telegram: {e}")
                         
@@ -399,7 +643,7 @@ class CryptoAnalyzer:
                                         # Send anomaly-triggered signal to Telegram
                                         if TELEGRAM_AVAILABLE:
                                             try:
-                                                await telegram_bot.send_signal(signal)
+                                                await self.telegram_notifier.send_turkish_trading_signal(signal)
                                             except Exception as e:
                                                 self.logger.error(f"Failed to send anomaly signal to Telegram: {e}")
                         except Exception as e:
@@ -410,7 +654,7 @@ class CryptoAnalyzer:
             # Send error to Telegram
             if TELEGRAM_AVAILABLE:
                 try:
-                    await telegram_bot.send_error(str(e), "Hourly Scan")
+                    await self.telegram_notifier.send_error_notification(str(e), "Hourly Scan")
                 except:
                     pass
 
@@ -557,9 +801,9 @@ class CryptoAnalyzer:
         self.running = True
         
         # Send startup notification to Telegram
-        if TELEGRAM_AVAILABLE:
+        if self.telegram_notifier:
             try:
-                await telegram_bot.send_startup()
+                await self.telegram_notifier.send_startup_notification()
             except Exception as e:
                 self.logger.error(f"Failed to send startup notification: {e}")
         
@@ -599,9 +843,9 @@ class CryptoAnalyzer:
         except Exception as e:
             self.logger.error(f"Scheduler error: {e}")
             # Send error to Telegram
-            if TELEGRAM_AVAILABLE:
+            if self.telegram_notifier:
                 try:
-                    await telegram_bot.send_error(str(e), "Main Scheduler")
+                    await self.telegram_notifier.send_error_notification(str(e), "Main Scheduler")
                 except:
                     pass
         finally:
@@ -619,11 +863,42 @@ class CryptoAnalyzer:
                 self.logger.error(f"Error disconnecting WebSocket: {e}")
 
 
-async def main():
-    """Main entry point."""
-    analyzer = CryptoAnalyzer()
-    await analyzer.run_scheduler()
+def run_scheduler_background():
+    """Run the scheduler in background thread for Render."""
+    global analyzer_instance
+    
+    async def scheduler_main():
+        analyzer_instance = CryptoAnalyzer()
+        await analyzer_instance.run_scheduler()
+    
+    # Run in new event loop for background thread
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(scheduler_main())
 
+async def main():
+    """Main entry point for local development."""
+    global analyzer_instance
+    analyzer_instance = CryptoAnalyzer()
+    await analyzer_instance.run_scheduler()
+
+# Render.com entry point
+def create_app():
+    """Create Flask app for Render deployment."""
+    global analyzer_instance
+    
+    # Start the scheduler in a background thread
+    scheduler_thread = threading.Thread(target=run_scheduler_background, daemon=True)
+    scheduler_thread.start()
+    
+    # Wait a moment for initialization
+    time.sleep(2)
+    
+    return app
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    # Local development
+    asyncio.run(main())
+else:
+    # Render.com deployment
+    app = create_app() 

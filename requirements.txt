@@ -1,10 +1,16 @@
-# Crypto AI Analyzer Dependencies
+# Crypto AI Analyzer Dependencies - Render.com Ready
+
+# Web Framework for Render deployment
+Flask>=2.3.0
+gunicorn>=21.2.0
 
 # HTTP client for API requests
 aiohttp>=3.8.0
+requests>=2.31.0
 
 # WebSocket client for real-time data
 websocket-client>=1.6.0
+websockets>=11.0.0
 
 # Async support
 asyncio-mqtt>=0.11.0
@@ -12,14 +18,41 @@ asyncio-mqtt>=0.11.0
 # Telegram Bot API
 python-telegram-bot>=20.7
 
-# Optional: For more advanced technical analysis
-# numpy>=1.21.0
-# pandas>=1.3.0
+# Environment variables
+python-dotenv>=1.0.0
 
-# Optional: For real AI integration (uncomment when ready to use)
-# openai>=1.0.0
-# anthropic>=0.3.0
+# JSON Web Tokens
+PyJWT>=2.8.0
+
+# Date and time handling
+python-dateutil>=2.8.0
+
+# SSL support
+certifi>=2023.0.0
+
+# Data analysis (for technical indicators)
+numpy>=1.21.0
+pandas>=1.5.0
+
+# AI Integration
+openai>=1.3.0
+anthropic>=0.7.0
+
+# Logging and monitoring
+structlog>=23.1.0
 
 # Development and testing
-# pytest>=7.0.0
-# pytest-asyncio>=0.21.0 
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+
+# Production server
+uvicorn[standard]>=0.23.0
+
+# Security
+cryptography>=41.0.0
+
+# Rate limiting
+slowapi>=0.1.9
+
+# Caching
+redis>=5.0.0 
