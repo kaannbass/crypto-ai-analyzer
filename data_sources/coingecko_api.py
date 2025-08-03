@@ -17,13 +17,13 @@ class CoinGeckoAPI:
         self.base_url = "https://api.coingecko.com/api/v3"
         self.session = None
         
-        # Symbol mapping from Binance format to CoinGecko IDs
+        # Symbol mapping from Binance format to CoinGecko IDs - Updated for production
         self.symbol_mapping = {
             'BTCUSDT': 'bitcoin',
             'ETHUSDT': 'ethereum', 
             'BNBUSDT': 'binancecoin',
             'ADAUSDT': 'cardano',
-            'PEPEUSDT': 'pepecoin',
+            'PEPEUSDT': 'pepe',  # Fixed: pepecoin -> pepe
             'SOLUSDT': 'solana',
             'XRPUSDT': 'ripple',
             'DOGEUSDT': 'dogecoin',
