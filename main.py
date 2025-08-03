@@ -310,27 +310,27 @@ class CryptoAnalyzer:
             self.logger.error(f"Error loading existing data: {e}")
 
     async def get_market_data(self) -> Dict:
-        """Get market data from available sources."""
+        """Get LIVE market data ONLY - no fallback/mock data."""
         try:
-            # Try to import data manager for real data
+            # Import data manager for LIVE data only
             from data_sources.data_manager import DataManager
             data_manager = DataManager()
             
-            # Attempt to get real market data
-            real_data = await data_manager.get_market_data(config.SYMBOLS)
+            # Force refresh to get LIVE data
+            live_data = await data_manager.get_market_data(config.SYMBOLS, force_refresh=True)
             
-            if real_data:
-                self.logger.info(f"Retrieved real market data for {len(real_data)} symbols")
+            if live_data and len(live_data) >= 3:  # Must have at least 3 symbols
+                self.logger.info(f"✅ Retrieved LIVE market data for {len(live_data)} symbols")
                 # Save to file for web endpoint
-                await self.save_market_data(real_data)
-                return real_data
+                await self.save_market_data(live_data)
+                return live_data
             else:
-                self.logger.warning("No real market data available, using fallback")
-                return self.get_fallback_data()
+                self.logger.error("❌ NO LIVE DATA AVAILABLE - Skipping analysis")
+                return {}  # Return empty dict if no live data
                 
         except Exception as e:
-            self.logger.error(f"Error fetching real market data: {e}")
-            return self.get_fallback_data()
+            self.logger.error(f"❌ Error fetching LIVE market data: {e}")
+            return {}  # Return empty dict on error - NO FALLBACK
 
     async def save_market_data(self, market_data: Dict):
         """Save market data to file for web endpoints."""
@@ -396,16 +396,7 @@ class CryptoAnalyzer:
         except Exception as e:
             self.logger.error(f"Error saving news data: {e}")
             
-    def get_fallback_data(self) -> Dict:
-        """Generate fallback mock data for testing."""
-        base_data = {
-            'BTCUSDT': {'price': 50000.0, 'change_24h': 0.02, 'volume': 1000000.0},
-            'ETHUSDT': {'price': 3000.0, 'change_24h': -0.01, 'volume': 800000.0},
-            'BNBUSDT': {'price': 500.0, 'change_24h': 0.005, 'volume': 500000.0},
-            'ADAUSDT': {'price': 0.8, 'change_24h': 0.03, 'volume': 300000.0},
-            'SOLUSDT': {'price': 150.0, 'change_24h': -0.02, 'volume': 600000.0}
-        }
-        return base_data
+    # REMOVED: No fallback/mock data - LIVE DATA ONLY
 
     def get_live_prices(self) -> Dict:
         """Get live prices from WebSocket if available."""
@@ -418,18 +409,25 @@ class CryptoAnalyzer:
         return {}
             
     async def daily_analysis(self):
-        """Perform daily analysis at 08:00 UTC with Turkish signals."""
-        self.logger.info("Starting daily analysis...")
+        """Perform analysis with LIVE data only."""
+        self.logger.info("🔄 Starting analysis with LIVE DATA ONLY...")
         
         # Check if we can trade today
         if not self.risk_guard.can_trade_today():
             self.logger.info("Daily trading limits reached, skipping analysis")
             return
             
-        # Get market data (try live first, then fallback)
+        # Get LIVE market data ONLY
         market_data = await self.get_market_data()
         
-        # Generate signals using rules
+        # If NO LIVE DATA, skip analysis completely
+        if not market_data:
+            self.logger.error("❌ NO LIVE DATA - Skipping all analysis")
+            return
+        
+        self.logger.info(f"✅ Processing LIVE data for {len(market_data)} symbols")
+        
+        # Generate signals using rules with LIVE data
         rule_signals = []
         for symbol in config.SYMBOLS:
             if symbol in market_data:
@@ -437,7 +435,7 @@ class CryptoAnalyzer:
                 if signal:
                     rule_signals.append(signal)
                     
-        # Get AI analysis if available
+        # Get AI analysis if available (with LIVE data)
         ai_signals = []
         try:
             ai_analysis = await self.ai_aggregator.get_daily_analysis(market_data)
@@ -449,39 +447,47 @@ class CryptoAnalyzer:
         # Combine and validate signals
         final_signals = self.combine_signals(rule_signals, ai_signals)
         
-        # Apply risk management and send to Telegram
+        # Apply risk management
         validated_signals = []
         for signal in final_signals:
             if self.risk_guard.validate_signal(signal):
                 validated_signals.append(signal)
                 self.save_signal(signal)
         
-        # Send Turkish format signals to Telegram and cache them
-        if self.telegram_notifier:
-            try:
-                if validated_signals:
-                    # Send Turkish format signals
-                    await self.telegram_notifier.send_turkish_trading_signal(validated_signals[0])
-                    
-                    # Send daily summary
-                    stats = self.calculate_daily_stats(validated_signals)
-                    await self.telegram_notifier.send_daily_summary(stats)
-                
-                # Always generate and cache Turkish signals for web endpoint
-                await self.telegram_notifier.get_turkish_signals()
-                
-            except Exception as e:
-                self.logger.error(f"Failed to send Turkish signals to Telegram: {e}")
-                
-        self.logger.info(f"Daily analysis complete. Generated {len(validated_signals)} signals")
+        self.logger.info(f"✅ Analysis complete with LIVE data. Generated {len(validated_signals)} signals")
+        return validated_signals
 
-        # Send daily summary to Telegram
-        if TELEGRAM_AVAILABLE and validated_signals:
-            try:
-                stats = self.calculate_daily_stats(validated_signals)
-                await self.telegram_notifier.send_daily_summary(stats)
-            except Exception as e:
-                self.logger.error(f"Failed to send daily summary to Telegram: {e}")
+    async def hourly_telegram_update(self):
+        """Send Turkish signals to Telegram every hour with LIVE data only."""
+        try:
+            self.logger.info("📤 Sending hourly Telegram update...")
+            
+            if not self.telegram_notifier:
+                self.logger.warning("Telegram notifier not available")
+                return
+            
+            # Get LIVE market data
+            market_data = await self.get_market_data()
+            
+            # If NO LIVE DATA, don't send anything
+            if not market_data:
+                self.logger.error("❌ NO LIVE DATA - Skipping Telegram update")
+                return
+                
+            # Generate Turkish signals with LIVE data
+            turkish_signals = await self.telegram_notifier.get_turkish_signals()
+            
+            if turkish_signals and "❌" not in turkish_signals:  # Only send if successful
+                # Send to Telegram
+                await self.telegram_notifier.send_message(
+                    f"🕐 <b>SAATLİK CANLI SİNYAL GÜNCELLEMESİ</b>\n\n{turkish_signals}"
+                )
+                self.logger.info("✅ Hourly LIVE signals sent to Telegram")
+            else:
+                self.logger.error("❌ Failed to generate Turkish signals - No Telegram update sent")
+                
+        except Exception as e:
+            self.logger.error(f"Error in hourly Telegram update: {e}")
 
     async def macro_sentiment_analysis(self, news_data: List = None, events_data: List = None):
         """Perform comprehensive macro sentiment analysis."""
@@ -609,28 +615,34 @@ class CryptoAnalyzer:
                     pass
         
     async def hourly_scan(self):
-        """Perform hourly market anomaly scan."""
-        self.logger.info("Starting hourly scan...")
+        """Perform anomaly scan with LIVE data only."""
+        self.logger.info("🔍 Starting anomaly scan with LIVE data...")
         
         try:
-            # Get current market data
+            # Get LIVE market data only
             market_data = await self.get_market_data()
             
-            # Detect pumps and anomalies
-            for symbol in config.SYMBOLS:
+            # If NO LIVE DATA, skip scan
+            if not market_data:
+                self.logger.error("❌ NO LIVE DATA - Skipping anomaly scan")
+                return
+            
+            # Detect pumps and anomalies with LIVE data
+            for symbol in config.SYMBOLS[:5]:  # Check top 5 symbols
                 if symbol in market_data:
                     anomaly = await self.pump_detector.detect_anomaly(symbol, market_data[symbol])
                     if anomaly:
-                        self.logger.info(f"Anomaly detected: {anomaly}")
+                        self.logger.info(f"⚠️ LIVE anomaly detected: {anomaly}")
                         
-                        # Send anomaly alert to Telegram
-                        if TELEGRAM_AVAILABLE:
+                        # Send anomaly alert to Telegram immediately
+                        if self.telegram_notifier:
                             try:
-                                await self.telegram_notifier.send_anomaly(anomaly)
+                                await self.telegram_notifier.send_anomaly_alert(anomaly)
+                                self.logger.info("📤 Anomaly alert sent to Telegram")
                             except Exception as e:
                                 self.logger.error(f"Failed to send anomaly to Telegram: {e}")
                         
-                        # Run focused AI analysis on the anomaly
+                        # Send AI analysis only if available
                         try:
                             ai_analysis = await self.ai_aggregator.get_daily_analysis({symbol: market_data[symbol]})
                             if ai_analysis:
@@ -639,22 +651,17 @@ class CryptoAnalyzer:
                                     if self.risk_guard.validate_signal(signal):
                                         signal['anomaly_trigger'] = anomaly
                                         self.save_signal(signal)
-                                        
-                                        # Send anomaly-triggered signal to Telegram
-                                        if TELEGRAM_AVAILABLE:
-                                            try:
-                                                await self.telegram_notifier.send_turkish_trading_signal(signal)
-                                            except Exception as e:
-                                                self.logger.error(f"Failed to send anomaly signal to Telegram: {e}")
                         except Exception as e:
                             self.logger.warning(f"AI analysis for anomaly failed: {e}")
+                        
+                        break  # Only process one anomaly per scan to avoid spam
                             
         except Exception as e:
-            self.logger.error(f"Hourly scan failed: {e}")
+            self.logger.error(f"LIVE anomaly scan failed: {e}")
             # Send error to Telegram
-            if TELEGRAM_AVAILABLE:
+            if self.telegram_notifier:
                 try:
-                    await self.telegram_notifier.send_error_notification(str(e), "Hourly Scan")
+                    await self.telegram_notifier.send_error_notification(str(e), "LIVE Anomaly Scan")
                 except:
                     pass
 
@@ -796,8 +803,8 @@ class CryptoAnalyzer:
             self.logger.error(f"Error saving macro analysis: {e}")
 
     async def run_scheduler(self):
-        """Run the main scheduler loop."""
-        self.logger.info("Starting crypto analyzer scheduler...")
+        """Run scheduler with LIVE DATA ONLY and hourly Telegram updates."""
+        self.logger.info("🚀 Starting LIVE DATA crypto analyzer (Hourly Telegram Updates)...")
         self.running = True
         
         # Send startup notification to Telegram
@@ -807,35 +814,42 @@ class CryptoAnalyzer:
             except Exception as e:
                 self.logger.error(f"Failed to send startup notification: {e}")
         
-        # Initial analysis
+        # Initial analysis with LIVE data only
         await self.daily_analysis()
-        await self.hourly_scan()
         
-        # Initial news analysis
-        if NEWS_API_AVAILABLE:
-            await self.news_based_analysis()
+        # Initial Telegram update
+        await self.hourly_telegram_update()
+        
+        last_hour = -1  # Track last hour for hourly updates
         
         try:
             while self.running:
                 current_time = datetime.utcnow()
+                current_hour = current_time.hour
+                current_minute = current_time.minute
                 
-                # Daily analysis at 08:00 UTC
-                if self.time_trigger.should_run_daily(current_time):
+                # === HOURLY TELEGRAM UPDATE (Every hour at minute 0-5) ===
+                if current_minute < 5 and current_hour != last_hour:
+                    await self.hourly_telegram_update()
+                    last_hour = current_hour
+                    
+                # === DAILY ANALYSIS (08:00 UTC) ===
+                if current_hour == 8 and current_minute < 5:
                     await self.daily_analysis()
                     
-                # Hourly scans
-                if self.time_trigger.should_run_hourly(current_time):
+                # === ANOMALY DETECTION (Every 30 minutes) ===
+                if current_minute in [0, 30] and current_minute < 5:
                     await self.hourly_scan()
                     
-                # News analysis every 2 hours
-                if NEWS_API_AVAILABLE and current_time.hour % 2 == 0 and current_time.minute < 5:
+                # === NEWS ANALYSIS (Every 4 hours) ===
+                if NEWS_API_AVAILABLE and current_hour % 4 == 0 and current_minute < 5:
                     await self.news_based_analysis()
                     
-                # Macro sentiment analysis every 4 hours
-                if current_time.hour % 4 == 0 and current_time.minute < 5:
+                # === MACRO SENTIMENT (Every 6 hours) ===
+                if current_hour % 6 == 0 and current_minute < 5:
                     await self.macro_sentiment_analysis()
                     
-                # Sleep for a minute before checking again
+                # Sleep for a minute before next check
                 await asyncio.sleep(60)
                 
         except KeyboardInterrupt:
@@ -845,7 +859,7 @@ class CryptoAnalyzer:
             # Send error to Telegram
             if self.telegram_notifier:
                 try:
-                    await self.telegram_notifier.send_error_notification(str(e), "Main Scheduler")
+                    await self.telegram_notifier.send_error_notification(str(e), "LIVE DATA Scheduler")
                 except:
                     pass
         finally:

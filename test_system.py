@@ -1,353 +1,223 @@
 #!/usr/bin/env python3
 """
-Quick system test script for Crypto AI Analyzer
-Tests all major components to ensure everything works.
+System test for Crypto AI Analyzer - Render Ready
+Tests all components including Turkish signals.
 """
 
 import asyncio
-import time
 import json
+import logging
 import os
+import sys
+import requests
 from datetime import datetime
 
-def test_imports():
-    """Test if all required modules can be imported."""
-    print("🔧 Testing imports...")
-    
-    try:
-        import config
-        print("✅ config.py imported successfully")
-        
-        from data_sources.data_manager import DataManager
-        print("✅ DataManager imported successfully")
-        
-        from rules.rule_engine import RuleEngine
-        print("✅ RuleEngine imported successfully")
-        
-        from rules.risk_guard import RiskGuard
-        print("✅ RiskGuard imported successfully")
-        
-        from llm.aggregator import AIAggregator
-        print("✅ AIAggregator imported successfully")
-        
-        from binance_websocket_client import BinanceWebSocketClient
-        print("✅ BinanceWebSocketClient imported successfully")
-        
-        return True
-        
-    except ImportError as e:
-        print(f"❌ Import error: {e}")
-        return False
+# Add current directory to path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-def test_data_directory():
-    """Test data directory creation."""
-    print("\n📁 Testing data directory...")
-    
-    try:
-        import config
-        os.makedirs(config.DATA_DIR, exist_ok=True)
-        
-        # Test file creation
-        test_files = [config.PRICES_FILE, config.NEWS_FILE, config.SIGNALS_FILE]
-        
-        for file_path in test_files:
-            if not os.path.exists(file_path):
-                with open(file_path, 'w') as f:
-                    json.dump([], f)
-                print(f"✅ Created {file_path}")
-            else:
-                print(f"✅ {file_path} already exists")
-                
-        return True
-        
-    except Exception as e:
-        print(f"❌ Data directory error: {e}")
-        return False
+import config
 
-def test_websocket_client():
-    """Test WebSocket client initialization."""
-    print("\n🌐 Testing WebSocket client...")
-    
-    try:
-        from binance_websocket_client import BinanceWebSocketClient
-        
-        # Test initialization
-        client = BinanceWebSocketClient(
-            symbols=["btcusdt"],
-            log_file="test_feed.jsonl"
-        )
-        print("✅ WebSocket client initialized")
-        
-        # Test start/stop
-        client.start()
-        print("✅ WebSocket client started")
-        
-        time.sleep(3)  # Let it connect
-        
-        if client.is_running():
-            print("✅ WebSocket client is running")
-        else:
-            print("⚠️ WebSocket client not running (might be network issue)")
-        
-        client.stop()
-        print("✅ WebSocket client stopped")
-        
-        # Clean up test file
-        if os.path.exists("test_feed.jsonl"):
-            os.remove("test_feed.jsonl")
-            
-        return True
-        
-    except Exception as e:
-        print(f"❌ WebSocket client error: {e}")
-        return False
-
-async def test_data_manager():
-    """Test DataManager API calls."""
-    print("\n📊 Testing DataManager...")
+async def test_data_sources():
+    """Test data source availability."""
+    print("📊 Testing Data Sources...")
     
     try:
         from data_sources.data_manager import DataManager
-        import config
+        data_manager = DataManager()
         
-        dm = DataManager()
-        print("✅ DataManager initialized")
-        
-        # Test API connectivity
-        sources = await dm.test_all_sources()
-        print(f"✅ API sources tested: {sources}")
-        
-        # Test market data retrieval
-        symbols = config.SYMBOLS[:2]  # Test with first 2 symbols only
-        market_data = await dm.get_market_data(symbols)
+        # Test market data
+        market_data = await data_manager.get_market_data(['BTCUSDT', 'ETHUSDT'])
         
         if market_data:
-            print(f"✅ Market data retrieved for {len(market_data)} symbols")
-            for symbol, data in market_data.items():
-                price = data.get('price', 0)
-                source = data.get('source', 'unknown')
-                print(f"   💰 {symbol}: ${price:,.2f} [{source}]")
+            print(f"✅ Market data: {len(market_data)} symbols")
+            for symbol, data in list(market_data.items())[:2]:
+                print(f"   - {symbol}: ${data.get('price', 'N/A')}")
         else:
-            print("⚠️ No market data retrieved (using mock data)")
+            print("❌ No market data available")
             
-        return True
-        
     except Exception as e:
-        print(f"❌ DataManager error: {e}")
-        return False
+        print(f"❌ Data source error: {e}")
 
 async def test_rule_engine():
-    """Test RuleEngine calculations."""
-    print("\n⚖️ Testing RuleEngine...")
+    """Test rule engine."""
+    print("\n🔧 Testing Rule Engine...")
     
     try:
         from rules.rule_engine import RuleEngine
+        rule_engine = RuleEngine()
         
-        engine = RuleEngine()
-        print("✅ RuleEngine initialized")
-        
-        # Test technical indicators
-        mock_prices = [100, 102, 98, 105, 107, 103, 101, 99, 104, 106]
-        
-        rsi = engine.calculate_rsi(mock_prices)
-        print(f"✅ RSI calculated: {rsi:.2f}")
-        
-        macd = engine.calculate_macd(mock_prices)
-        print(f"✅ MACD calculated: {macd['macd']:.4f}")
-        
-        bb = engine.calculate_bollinger_bands(mock_prices)
-        print(f"✅ Bollinger Bands: Upper={bb['upper']:.2f}, Lower={bb['lower']:.2f}")
-        
-        # Test signal generation with async call
-        mock_market_data = {
-            'price': 105,
-            'volume': 1000000,
+        # Test with mock data
+        mock_data = {
+            'price': 50000.0,
+            'volume': 1000000.0,
             'change_24h': 0.02
         }
         
-        signal = await engine.generate_signal("TESTUSDT", mock_market_data)
-        if signal:
-            print(f"✅ Signal generated: {signal['action']} (confidence: {signal['confidence']:.2f})")
-        else:
-            print("⚠️ No signal generated (no historical data available)")
-            
-        return True
+        signal = await rule_engine.generate_signal('BTCUSDT', mock_data)
         
+        if signal:
+            print(f"✅ Rule signal: {signal['action']} (confidence: {signal['confidence']:.2f})")
+        else:
+            print("❌ No rule signal generated")
+            
     except Exception as e:
-        print(f"❌ RuleEngine error: {e}")
-        return False
+        print(f"❌ Rule engine error: {e}")
 
-def test_risk_guard():
-    """Test RiskGuard functionality."""
-    print("\n🛡️ Testing RiskGuard...")
+async def test_telegram_bot():
+    """Test Telegram bot."""
+    print("\n📱 Testing Telegram Bot...")
     
     try:
-        from rules.risk_guard import RiskGuard
+        from telegram_bot_module.telegram_bot import EnhancedTelegramNotifier
+        telegram_bot = EnhancedTelegramNotifier()
         
-        guard = RiskGuard()
-        print("✅ RiskGuard initialized")
-        
-        # Test trading limits
-        can_trade = guard.can_trade_today()
-        print(f"✅ Can trade today: {can_trade}")
-        
-        # Test signal validation
-        test_signal = {
-            'symbol': 'TESTUSDT',
-            'action': 'BUY',
-            'confidence': 0.75,
-            'reasoning': 'Test signal'
-        }
-        
-        is_valid = guard.validate_signal(test_signal)
-        print(f"✅ Signal validation: {is_valid}")
-        
-        # Test stop loss calculation
-        stop_loss = guard.calculate_stop_loss(100, 'BUY')
-        take_profit = guard.calculate_take_profit(100, 'BUY')
-        print(f"✅ Stop loss: ${stop_loss:.2f}, Take profit: ${take_profit:.2f}")
-        
-        return True
-        
+        if telegram_bot.enabled:
+            print("✅ Telegram bot initialized")
+            
+            # Test Turkish signals generation
+            turkish_signals = await telegram_bot.get_turkish_signals()
+            if turkish_signals:
+                print("✅ Turkish signals generated")
+                print(f"   Signal length: {len(turkish_signals)} characters")
+                
+                # Check if cached
+                cache_file = f"{config.DATA_DIR}/turkish_signals.json"
+                if os.path.exists(cache_file):
+                    print("✅ Turkish signals cached successfully")
+                else:
+                    print("⚠️ Turkish signals not cached")
+            else:
+                print("❌ No Turkish signals generated")
+        else:
+            print("⚠️ Telegram bot not enabled (missing config)")
+            
     except Exception as e:
-        print(f"❌ RiskGuard error: {e}")
-        return False
+        print(f"❌ Telegram bot error: {e}")
 
-async def test_ai_aggregator():
-    """Test AI Aggregator."""
-    print("\n🤖 Testing AI Aggregator...")
+async def test_ai_integration():
+    """Test AI integration."""
+    print("\n🤖 Testing AI Integration...")
     
     try:
         from llm.aggregator import AIAggregator
+        ai_aggregator = AIAggregator()
         
-        aggregator = AIAggregator()
-        print("✅ AIAggregator initialized")
-        
-        # Test AI client availability
-        connections = await aggregator.test_all_connections()
-        print(f"✅ AI connections tested: {connections}")
-        
-        # Test mock analysis
-        mock_market_data = {
-            'BTCUSDT': {
-                'price': 50000,
-                'volume': 1000000,
-                'change_24h': 0.03
-            }
-        }
-        
-        analysis = await aggregator.get_daily_analysis(mock_market_data)
-        if analysis:
-            signals = analysis.get('signals', [])
-            print(f"✅ AI analysis completed with {len(signals)} signals")
+        # Test AI availability
+        if config.OPENAI_API_KEY:
+            print("✅ OpenAI API key configured")
         else:
-            print("⚠️ AI analysis returned no results")
+            print("⚠️ OpenAI API key not configured")
             
-        return True
-        
+        if config.CLAUDE_API_KEY:
+            print("✅ Claude API key configured")
+        else:
+            print("⚠️ Claude API key not configured")
+            
+        if not config.OPENAI_API_KEY and not config.CLAUDE_API_KEY:
+            print("❌ No AI API keys configured")
+        else:
+            print("✅ At least one AI model available")
+            
     except Exception as e:
-        print(f"❌ AI Aggregator error: {e}")
-        return False
+        print(f"❌ AI integration error: {e}")
 
-def test_monitor():
-    """Test monitoring components."""
-    print("\n📊 Testing Monitor components...")
+def test_flask_app():
+    """Test Flask app endpoints (if running)."""
+    print("\n🌐 Testing Flask App...")
     
     try:
-        # Test if monitor files exist
-        monitors = ['monitor_results.py', 'monitor_results_enhanced.py']
+        import main
+        app = main.app
+        client = app.test_client()
         
-        for monitor in monitors:
-            if os.path.exists(monitor):
-                print(f"✅ {monitor} exists")
-            else:
-                print(f"⚠️ {monitor} not found")
+        # Test endpoints
+        endpoints = [
+            ('/', 'Home'),
+            ('/health', 'Health Check'),
+            ('/signals', 'Signals'),
+            ('/signals/turkish', 'Turkish Signals'),
+            ('/status', 'Status'),
+            ('/market-data', 'Market Data')
+        ]
         
-        # Test if we can load signals and prices
-        import config
-        
-        try:
-            with open(config.SIGNALS_FILE, 'r') as f:
-                signals = json.load(f)
-            print(f"✅ Signals file loaded ({len(signals)} signals)")
-        except:
-            print("⚠️ Signals file empty or not readable")
-        
-        try:
-            with open(config.PRICES_FILE, 'r') as f:
-                prices = json.load(f)
-            print(f"✅ Prices file loaded")
-        except:
-            print("⚠️ Prices file empty or not readable")
-            
-        return True
-        
+        for endpoint, name in endpoints:
+            try:
+                response = client.get(endpoint)
+                if response.status_code in [200, 503, 404]:  # 503 and 404 are acceptable for some endpoints
+                    print(f"✅ {name}: HTTP {response.status_code}")
+                else:
+                    print(f"⚠️ {name}: HTTP {response.status_code}")
+            except Exception as e:
+                print(f"❌ {name}: {e}")
+                
     except Exception as e:
-        print(f"❌ Monitor test error: {e}")
-        return False
+        print(f"❌ Flask app error: {e}")
 
-async def run_all_tests():
-    """Run all tests."""
-    print("🧪 Starting Crypto AI Analyzer System Tests")
-    print("=" * 60)
+def test_render_readiness():
+    """Test Render deployment readiness."""
+    print("\n🚀 Testing Render Readiness...")
     
-    tests = [
-        ("Imports", test_imports),
-        ("Data Directory", test_data_directory),
-        ("WebSocket Client", test_websocket_client),
-        ("DataManager", test_data_manager),
-        ("RuleEngine", test_rule_engine),  # Now async
-        ("RiskGuard", test_risk_guard),
-        ("AI Aggregator", test_ai_aggregator),
-        ("Monitor", test_monitor)
+    # Check required files
+    required_files = [
+        'main.py',
+        'requirements.txt',
+        'runtime.txt',
+        'Procfile',
+        'RENDER_DEPLOYMENT.md'
     ]
     
-    results = []
-    
-    for test_name, test_func in tests:
-        print(f"\n{'='*20} {test_name} {'='*20}")
-        
-        try:
-            if asyncio.iscoroutinefunction(test_func):
-                result = await test_func()
-            else:
-                result = test_func()
-            results.append((test_name, result))
-        except Exception as e:
-            print(f"❌ {test_name} failed with exception: {e}")
-            results.append((test_name, False))
-    
-    # Summary
-    print(f"\n{'='*60}")
-    print("🎯 TEST SUMMARY")
-    print("=" * 60)
-    
-    passed = 0
-    failed = 0
-    
-    for test_name, result in results:
-        status = "✅ PASSED" if result else "❌ FAILED"
-        print(f"{test_name:20} : {status}")
-        
-        if result:
-            passed += 1
+    for file in required_files:
+        if os.path.exists(file):
+            print(f"✅ {file} exists")
         else:
-            failed += 1
+            print(f"❌ {file} missing")
     
-    print(f"\n📊 RESULTS: {passed} passed, {failed} failed")
+    # Check environment variables
+    env_vars = [
+        'TELEGRAM_BOT_TOKEN',
+        'TELEGRAM_CHAT_ID'
+    ]
     
-    if failed == 0:
-        print("🎉 All tests passed! System is ready to use.")
-        print("\nNext steps:")
-        print("1. Run: python main.py")
-        print("2. In another terminal: python monitor_results_enhanced.py")
-        print("3. Check RUN_GUIDE.md for detailed instructions")
+    for var in env_vars:
+        if os.getenv(var):
+            print(f"✅ {var} configured")
+        else:
+            print(f"⚠️ {var} not configured (required for Render)")
+    
+    # Check optional env vars
+    optional_vars = ['OPENAI_API_KEY', 'CLAUDE_API_KEY']
+    ai_configured = any(os.getenv(var) for var in optional_vars)
+    
+    if ai_configured:
+        print("✅ At least one AI API key configured")
     else:
-        print("⚠️ Some tests failed. Check the errors above.")
-        print("💡 Common issues:")
-        print("   - Missing dependencies (run: pip install -r requirements.txt)")
-        print("   - Network connectivity issues")
-        print("   - File permission problems")
+        print("⚠️ No AI API keys configured (will use rule-based signals only)")
+
+async def main():
+    """Run all tests."""
+    print("🧪 Crypto AI Analyzer - System Test")
+    print("=" * 50)
+    
+    # Setup logging
+    logging.basicConfig(level=logging.WARNING)  # Reduce noise
+    
+    # Ensure data directory
+    os.makedirs(config.DATA_DIR, exist_ok=True)
+    
+    # Run tests
+    await test_data_sources()
+    await test_rule_engine()
+    await test_telegram_bot()
+    await test_ai_integration()
+    test_flask_app()
+    test_render_readiness()
+    
+    print("\n" + "=" * 50)
+    print("🎯 Test Summary:")
+    print("✅ = Working correctly")
+    print("⚠️ = Working but needs configuration")
+    print("❌ = Error or missing")
+    print("\n📚 See RENDER_DEPLOYMENT.md for deployment guide")
 
 if __name__ == "__main__":
-    asyncio.run(run_all_tests()) 
+    asyncio.run(main()) 

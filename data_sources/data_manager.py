@@ -9,7 +9,13 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 import config
 from data_sources.binance_api import get_binance_market_data
-from data_sources.coingecko_api import get_coingecko_market_data
+
+# Import CoinGecko with fallback
+try:
+    from data_sources.coingecko_api import get_coingecko_market_data
+except ImportError:
+    async def get_coingecko_market_data(symbols):
+        return {}
 
 
 class DataManager:
