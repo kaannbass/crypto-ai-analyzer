@@ -43,11 +43,10 @@ class BinanceAPI:
         # Connection pool settings
         connector = aiohttp.TCPConnector(
             ssl=ssl_context,
-            limit=20,
-            limit_per_host=10,
+            limit=10,
+            limit_per_host=5,
             enable_cleanup_closed=True,
-            force_close=True,
-            keepalive_timeout=30
+            force_close=False  # Fixed: Cannot use keepalive_timeout with force_close=True
         )
         
         self.session = aiohttp.ClientSession(

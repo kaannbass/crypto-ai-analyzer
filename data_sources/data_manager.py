@@ -23,6 +23,7 @@ class DataManager:
         self.logger = logging.getLogger(__name__)
         self.cache = {}
         self.cache_duration = 60  # Cache data for 60 seconds
+        self.coingecko_cache_duration = 3600  # CoinGecko cache for 1 hour (3600 seconds)
         self.preferred_source = 'binance'  # Primary data source
         
     async def get_market_data(self, symbols: List[str], force_refresh: bool = False) -> Dict:
@@ -56,36 +57,61 @@ class DataManager:
             return await self._load_from_file() or {}
             
     async def _fetch_from_sources(self, symbols: List[str]) -> Dict:
-        """Fetch data from multiple sources with fallback logic."""
-        sources = [
-            ('binance', get_binance_market_data),
-            ('coingecko', get_coingecko_market_data)
-        ]
+        """Fetch data from multiple sources with hourly CoinGecko rate limiting."""
         
-        for source_name, source_func in sources:
-            try:
-                self.logger.info(f"Trying to fetch data from {source_name}")
+        # Try Binance first (primary source)
+        try:
+            self.logger.info("🔄 Trying Binance API...")
+            market_data = await asyncio.wait_for(
+                get_binance_market_data(symbols), 
+                timeout=15.0
+            )
+            
+            if market_data and self._validate_data(market_data, symbols):
+                self.logger.info("✅ Successfully fetched data from Binance")
+                return market_data
+            else:
+                self.logger.warning("❌ Invalid or empty data from Binance")
                 
-                # Set timeout for each source
-                market_data = await asyncio.wait_for(
-                    source_func(symbols), 
-                    timeout=10.0
-                )
+        except asyncio.TimeoutError:
+            self.logger.warning("⏱️ Timeout fetching data from Binance")
+        except Exception as e:
+            self.logger.error(f"❌ Error fetching from Binance: {e}")
+        
+        # Fallback to CoinGecko with hourly cache
+        try:
+            coingecko_cache_key = f"coingecko_data_{'-'.join(sorted(symbols))}"
+            
+            # Check if CoinGecko cache is valid (1 hour)
+            if self._is_coingecko_cache_valid(coingecko_cache_key):
+                self.logger.info("✅ Using CoinGecko hourly cache")
+                return self.cache[coingecko_cache_key]['data']
+            
+            # Fetch fresh CoinGecko data (once per hour)
+            self.logger.info("🔄 Fetching fresh data from CoinGecko (hourly limit)")
+            market_data = await asyncio.wait_for(
+                get_coingecko_market_data(symbols), 
+                timeout=10.0
+            )
+            
+            if market_data and self._validate_data(market_data, symbols):
+                # Cache CoinGecko data for 1 hour
+                self.cache[coingecko_cache_key] = {
+                    'data': market_data,
+                    'timestamp': datetime.utcnow(),
+                    'symbols': symbols
+                }
+                self.logger.info("✅ Successfully fetched and cached CoinGecko data for 1 hour")
+                return market_data
+            else:
+                self.logger.warning("❌ Invalid or empty data from CoinGecko")
                 
-                if market_data and self._validate_data(market_data, symbols):
-                    self.logger.info(f"Successfully fetched data from {source_name}")
-                    return market_data
-                else:
-                    self.logger.warning(f"Invalid or empty data from {source_name}")
-                    
-            except asyncio.TimeoutError:
-                self.logger.warning(f"Timeout fetching data from {source_name}")
-                continue
-            except Exception as e:
-                self.logger.error(f"Error fetching from {source_name}: {e}")
-                continue
+        except asyncio.TimeoutError:
+            self.logger.warning("⏱️ Timeout fetching data from CoinGecko")
+        except Exception as e:
+            self.logger.error(f"❌ Error fetching from CoinGecko: {e}")
                 
-        self.logger.error("All data sources failed")
+        self.logger.error("🚫 All data sources failed")
         return {}
         
     def _validate_data(self, data: Dict, expected_symbols: List[str]) -> bool:
@@ -121,6 +147,17 @@ class DataManager:
         age = (datetime.utcnow() - cached_time).total_seconds()
         
         return age < self.cache_duration
+    
+    def _is_coingecko_cache_valid(self, cache_key: str) -> bool:
+        """Check if CoinGecko cached data is still valid (1 hour limit)."""
+        if cache_key not in self.cache:
+            return False
+            
+        cached_time = self.cache[cache_key]['timestamp']
+        age = (datetime.utcnow() - cached_time).total_seconds()
+        
+        # CoinGecko data is cached for 1 hour
+        return age < self.coingecko_cache_duration
         
     async def _save_to_file(self, data: Dict):
         """Save market data to file as backup."""

@@ -828,8 +828,9 @@ class CryptoAnalyzer:
                 current_hour = current_time.hour
                 current_minute = current_time.minute
                 
-                # === HOURLY TELEGRAM UPDATE (Every hour at minute 0-5) ===
-                if current_minute < 5 and current_hour != last_hour:
+                # === HOURLY TELEGRAM UPDATE (Every hour at minute 0-2) ===
+                if current_minute <= 2 and current_hour != last_hour:
+                    self.logger.info(f"🕐 Starting hourly update at {current_hour:02d}:{current_minute:02d} UTC")
                     await self.hourly_telegram_update()
                     last_hour = current_hour
                     

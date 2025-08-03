@@ -35,12 +35,19 @@ class CoinGeckoAPI:
         }
         
     async def __aenter__(self):
-        self.session = aiohttp.ClientSession()
+        # Add timeout and headers for better API handling
+        timeout = aiohttp.ClientTimeout(total=15, connect=5)
+        headers = {
+            'User-Agent': 'crypto-ai-analyzer/1.0',
+            'Accept': 'application/json'
+        }
+        self.session = aiohttp.ClientSession(timeout=timeout, headers=headers)
         return self
         
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         if self.session:
             await self.session.close()
+            await asyncio.sleep(0.1)  # Small delay for cleanup
             
     async def get_current_prices(self, symbols: List[str]) -> Dict:
         """Get current prices for symbols."""
@@ -62,29 +69,44 @@ class CoinGeckoAPI:
                 'include_24hr_vol': 'true'
             }
             
-            async with self.session.get(endpoint, params=params) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    
-                    # Convert back to our symbol format
-                    price_data = {}
-                    reverse_mapping = {v: k for k, v in self.symbol_mapping.items()}
-                    
-                    for coin_id, coin_data in data.items():
-                        if coin_id in reverse_mapping:
-                            symbol = reverse_mapping[coin_id]
-                            price_data[symbol] = {
-                                'price': coin_data.get('usd', 0),
-                                'change_24h': coin_data.get('usd_24h_change', 0) / 100 if coin_data.get('usd_24h_change') else 0,
-                                'volume_24h': coin_data.get('usd_24h_vol', 0),
-                                'timestamp': datetime.utcnow().isoformat(),
-                                'source': 'coingecko'
-                            }
+            # Retry logic for rate limiting
+            for attempt in range(2):  # 2 attempts
+                try:
+                    async with self.session.get(endpoint, params=params) as response:
+                        if response.status == 200:
+                            data = await response.json()
                             
-                    return price_data
-                else:
-                    self.logger.error(f"CoinGecko API error: {response.status}")
-                    return {}
+                            # Convert back to our symbol format
+                            price_data = {}
+                            reverse_mapping = {v: k for k, v in self.symbol_mapping.items()}
+                            
+                            for coin_id, coin_data in data.items():
+                                if coin_id in reverse_mapping:
+                                    symbol = reverse_mapping[coin_id]
+                                    price_data[symbol] = {
+                                        'price': coin_data.get('usd', 0),
+                                        'change_24h': coin_data.get('usd_24h_change', 0) / 100 if coin_data.get('usd_24h_change') else 0,
+                                        'volume_24h': coin_data.get('usd_24h_vol', 0),
+                                        'timestamp': datetime.utcnow().isoformat(),
+                                        'source': 'coingecko'
+                                    }
+                                    
+                            return price_data
+                        elif response.status == 429:  # Rate limited
+                            self.logger.warning(f"CoinGecko rate limited (attempt {attempt + 1}/2)")
+                            if attempt == 0:  # Wait before retry
+                                await asyncio.sleep(5)  # Wait 5 seconds
+                                continue
+                        else:
+                            self.logger.error(f"CoinGecko API error: {response.status}")
+                            return {}
+                except Exception as e:
+                    self.logger.error(f"CoinGecko request error (attempt {attempt + 1}): {e}")
+                    if attempt == 0:
+                        await asyncio.sleep(2)
+                        continue
+                    
+            return {}  # All attempts failed
                     
         except Exception as e:
             self.logger.error(f"Error fetching CoinGecko prices: {e}")

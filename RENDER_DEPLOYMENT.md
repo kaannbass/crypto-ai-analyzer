@@ -114,7 +114,11 @@ Deploy sonrası sistem otomatik olarak **SADECE CANLI VERİLERLE** çalışır:
 5. **Makro Sentiment Analizi** (6 saatte bir)
 6. **Türkçe Sinyal Cache** (sürekli güncel)
 
-**⚠️ ÖNEMLİ: Sistem sadece canlı market verileri kullanır. Mock/test verisi ASLA kullanılmaz!**
+**⚠️ ÖNEMLİ OPTIMIZASYONLAR:**
+- ✅ Sistem sadece canlı market verileri kullanır (Mock/test verisi ASLA kullanılmaz)
+- 🕐 CoinGecko API rate limiting: **Saatte 1 istek** (cache ile optimize edildi)
+- 🚀 Binance API öncelikli kullanılır (daha hızlı)
+- 💾 CoinGecko verileri 1 saat cache'lenir (rate limit koruması)
 
 ## ✅ Deployment Kontrolü
 
