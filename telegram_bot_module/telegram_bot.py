@@ -102,7 +102,7 @@ class EnhancedTelegramNotifier:
                 BotCommand("status", "⚙️ Sistem durumu"),
                 BotCommand("refresh", "🔄 Verileri yenile"),
                 BotCommand("analyze_now", "⚡ Anında analiz başlat"),
-                BotCommand("quick_stats", "⚡ Hızlı sistem durumu"),
+                BotCommand("quick_stats", "⚡ Hızlı durum"),
                 BotCommand("settings", "⚙️ Bot ayarları")
             ]
             
@@ -146,10 +146,12 @@ Hoş geldiniz! Gelişmiş AI destekli kripto analiz botuna!
             
             # Add interactive keyboard
             keyboard = [
-                [InlineKeyboardButton("📊 Market Overview", callback_data="market_overview")],
-                [InlineKeyboardButton("🎯 Latest Signals", callback_data="latest_signals")],
-                [InlineKeyboardButton("📈 Portfolio", callback_data="portfolio_view")],
-                [InlineKeyboardButton("⚙️ Settings", callback_data="settings_menu")]
+                [InlineKeyboardButton("🎯 Son Sinyaller", callback_data="latest_signals"),
+                 InlineKeyboardButton("📊 Market Durum", callback_data="market_overview")],
+                [InlineKeyboardButton("🔍 Kripto Analiz", callback_data="crypto_analyze_menu"),
+                 InlineKeyboardButton("💰 Hızlı Fiyat", callback_data="crypto_price_menu")],
+                [InlineKeyboardButton("📈 Portfolio", callback_data="portfolio_view"),
+                 InlineKeyboardButton("⚙️ Ayarlar", callback_data="settings_menu")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
@@ -361,20 +363,18 @@ Hoş geldiniz! Gelişmiş AI destekli kripto analiz botuna!
                     reply_markup=reply_markup
                 )
             else:
-                # No symbol provided - show options
+                # No symbol provided - show crypto selection menu
+                keyboard = await self.get_crypto_selection_keyboard()
+                
                 await update.message.reply_text(
-                    "🎯 <b>Hangi kripto için analiz istiyorsunuz?</b>\n\n"
-                    "Kullanım: <code>/analyze BTC</code> veya <code>/analyze BTCUSDT</code>\n\n"
-                    "📊 <b>Desteklenen Kriptolar:</b>\n"
-                    "• BTC, ETH, BNB, ADA, SOL\n"
-                    "• PEPE, XRP, DOGE, TRX\n"
-                    "• LINK, XLM, XMR, ZEC",
+                    "🎯 <b>Hangi kripto için detaylı analiz istiyorsunuz?</b>\n\n"
+                    "💡 <b>Aşağıdaki butonlardan seçin:</b>\n"
+                    "• Tüm desteklenen kriptolar listelendi\n"
+                    "• Tıklayarak anında analiz alabilirsiniz\n"
+                    "• Veya manuel: <code>/analyze BTC</code>\n\n"
+                    "🚀 <i>AI destekli detaylı analiz için kripto seçin!</i>",
                     parse_mode='HTML',
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("🔍 BTC Analiz", callback_data="analyze_BTC")],
-                        [InlineKeyboardButton("🔍 ETH Analiz", callback_data="analyze_ETH")],
-                        [InlineKeyboardButton("🔍 SOL Analiz", callback_data="analyze_SOL")]
-                    ])
+                    reply_markup=keyboard
                 )
                 
         except Exception as e:
@@ -685,7 +685,29 @@ Configure your notification preferences and analysis parameters.
             
             data = query.data
             
-            if data == "market_overview":
+            if data == "crypto_analyze_menu":
+                # Show crypto selection for analysis
+                keyboard = await self.get_crypto_selection_keyboard()
+                message = ("🎯 <b>Hangi kripto için detaylı analiz istiyorsunuz?</b>\n\n"
+                          "💡 Aşağıdaki butonlardan seçin ve AI destekli analiz alın!")
+                await query.edit_message_text(
+                    text=message,
+                    parse_mode='HTML',
+                    reply_markup=keyboard
+                )
+                return
+            elif data == "crypto_price_menu":
+                # Show crypto selection for price check
+                keyboard = await self.get_price_selection_keyboard()
+                message = ("💰 <b>Hangi kripto fiyatını kontrol etmek istiyorsunuz?</b>\n\n"
+                          "⚡ Anlık fiyat ve 24s değişim için kripto seçin!")
+                await query.edit_message_text(
+                    text=message,
+                    parse_mode='HTML',
+                    reply_markup=keyboard
+                )
+                return
+            elif data == "market_overview":
                 message = await self.get_market_overview()
             elif data == "latest_signals":
                 message = await self.get_latest_signals()
@@ -1673,19 +1695,17 @@ Configure your notification preferences and analysis parameters.
             args = context.args
             
             if not args:
+                keyboard = await self.get_price_selection_keyboard()
+                
                 await update.message.reply_text(
-                    "💰 <b>Hızlı Fiyat Kontrol</b>\n\n"
-                    "Kullanım: <code>/price BTC</code> veya <code>/price ETHUSDT</code>\n\n"
-                    "📊 <b>Örnekler:</b>\n"
-                    "• <code>/price BTC</code> - Bitcoin fiyatı\n"
-                    "• <code>/price ETH</code> - Ethereum fiyatı\n"
-                    "• <code>/price SOL</code> - Solana fiyatı",
+                    "💰 <b>Hangi kripto fiyatını kontrol etmek istiyorsunuz?</b>\n\n"
+                    "💡 <b>Aşağıdaki butonlardan seçin:</b>\n"
+                    "• Tüm desteklenen kriptolar\n"
+                    "• Anlık fiyat ve 24s değişim\n"
+                    "• Veya manuel: <code>/price BTC</code>\n\n"
+                    "⚡ <i>Hızlı fiyat kontrolü için kripto seçin!</i>",
                     parse_mode='HTML',
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("💰 BTC", callback_data="price_BTC"),
-                         InlineKeyboardButton("💰 ETH", callback_data="price_ETH"),
-                         InlineKeyboardButton("💰 SOL", callback_data="price_SOL")]
-                    ])
+                    reply_markup=keyboard
                 )
                 return
             
@@ -1748,6 +1768,68 @@ Configure your notification preferences and analysis parameters.
                 f"❌ <b>Fiyat hatası:</b> {str(e)}",
                 parse_mode='HTML'
             )
+
+    async def get_crypto_selection_keyboard(self):
+        """Create crypto selection keyboard with all supported symbols."""
+        import config
+        
+        # Group cryptos in rows of 3
+        keyboard = []
+        symbols = config.SYMBOLS
+        
+        for i in range(0, len(symbols), 3):
+            row = []
+            for symbol in symbols[i:i+3]:
+                crypto_name = symbol.replace('USDT', '')
+                # Add emoji for popular cryptos
+                emoji = {
+                    'BTC': '₿', 'ETH': 'Ξ', 'BNB': '🔶', 
+                    'ADA': '🔵', 'SOL': '☀️', 'XRP': '🌊',
+                    'DOGE': '🐕', 'DOT': '⚪', 'LINK': '🔗',
+                    'TRX': '🔴', 'XLM': '⭐', 'XMR': '🔒',
+                    'ZEC': '🛡️', 'PEPE': '🐸'
+                }.get(crypto_name, '💰')
+                
+                row.append(InlineKeyboardButton(
+                    f"{emoji} {crypto_name}", 
+                    callback_data=f"analyze_{crypto_name}"
+                ))
+            keyboard.append(row)
+        
+        # Add quick analysis buttons
+        keyboard.append([
+            InlineKeyboardButton("📊 Market Genel", callback_data="market_overview"),
+            InlineKeyboardButton("🎯 Tüm Sinyaller", callback_data="latest_signals")
+        ])
+        
+        return InlineKeyboardMarkup(keyboard)
+
+    async def get_price_selection_keyboard(self):
+        """Create price check selection keyboard."""
+        import config
+        
+        keyboard = []
+        symbols = config.SYMBOLS
+        
+        for i in range(0, len(symbols), 3):
+            row = []
+            for symbol in symbols[i:i+3]:
+                crypto_name = symbol.replace('USDT', '')
+                emoji = {
+                    'BTC': '₿', 'ETH': 'Ξ', 'BNB': '🔶', 
+                    'ADA': '🔵', 'SOL': '☀️', 'XRP': '🌊',
+                    'DOGE': '🐕', 'DOT': '⚪', 'LINK': '🔗',
+                    'TRX': '🔴', 'XLM': '⭐', 'XMR': '🔒',
+                    'ZEC': '🛡️', 'PEPE': '🐸'
+                }.get(crypto_name, '💰')
+                
+                row.append(InlineKeyboardButton(
+                    f"{emoji} {crypto_name}", 
+                    callback_data=f"price_{crypto_name}"
+                ))
+            keyboard.append(row)
+        
+        return InlineKeyboardMarkup(keyboard)
 
 
 # Global instance - Keep both for compatibility
