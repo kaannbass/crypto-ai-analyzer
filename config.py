@@ -20,7 +20,7 @@ COINGECKO_PRO_ENABLED = bool(COINGECKO_API_KEY.strip())
 # Telegram Bot Configuration
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID', '')  # Optional: specific chat ID
-TELEGRAM_ENABLED = bool(TELEGRAM_BOT_TOKEN.strip())
+TELEGRAM_ENABLED = bool(TELEGRAM_BOT_TOKEN.strip())  # Re-enabled
 
 # Trading Thresholds
 DAILY_PROFIT_TARGET = 0.01  # 1% daily profit target

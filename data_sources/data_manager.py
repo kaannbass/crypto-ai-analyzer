@@ -36,57 +36,39 @@ class DataManager:
         self.preferred_source = 'binance'  # Primary data source
         
     async def get_market_data(self, symbols: List[str], force_refresh: bool = False) -> Dict:
-        """Get market data with caching and multiple source fallback."""
+        """Get market data from live sources ONLY - no fallback data."""
         try:
-            cache_key = f"market_data_{'-'.join(sorted(symbols))}"
+            self.logger.info("🔄 Fetching LIVE data from real sources only...")
             
-            # Check cache first
-            if not force_refresh and self._is_cache_valid(cache_key):
-                self.logger.debug("Using cached market data")
-                return self.cache[cache_key]['data']
-                
-            # Try to get data from sources
-            market_data = await self._fetch_from_sources(symbols)
+            # Try Binance first (fastest and most reliable)
+            self.logger.info("🔄 Trying Binance API...")
+            binance_data = await self._get_binance_data(symbols, timeout=15)
             
-            if market_data:
-                # Cache the data
-                self.cache[cache_key] = {
-                    'data': market_data,
-                    'timestamp': datetime.utcnow(),
-                    'symbols': symbols
-                }
-                
-                # Save to file as backup
-                await self._save_to_file(market_data)
-                return market_data
-            else:
-                # If no fresh data, try fallback mechanisms
-                self.logger.warning("🔄 No fresh data available, trying fallback mechanisms...")
-                
-                # Try extended cache (older cached data)
-                fallback_data = await self._try_extended_cache(cache_key, symbols)
-                if fallback_data:
-                    return fallback_data
-                
-                # Try file backup
-                fallback_data = await self._load_from_file()
-                if fallback_data:
-                    self.logger.info("📁 Using backup data from file")
-                    return fallback_data
-                
-                # Last resort: try partial data with missing symbols filled with defaults
-                fallback_data = await self._create_fallback_data(symbols)
-                if fallback_data:
-                    self.logger.warning("⚠️ Using fallback data with default values")
-                    return fallback_data
-                
-                self.logger.error("🚫 All fallback mechanisms failed")
-                return {}
+            if binance_data and len(binance_data) >= len(symbols) * 0.8:  # At least 80% success
+                self.logger.info(f"✅ Binance API success: {len(binance_data)}/{len(symbols)} symbols")
+                return binance_data
+            
+            # Try CoinGecko if Binance fails or incomplete
+            self.logger.info("🔄 Fetching fresh data from CoinGecko Pro API")
+            coingecko_data = await self._get_coingecko_data(symbols, force_refresh=True)
+            
+            if coingecko_data and len(coingecko_data) >= len(symbols) * 0.5:  # At least 50% success
+                self.logger.info(f"✅ CoinGecko API success: {len(coingecko_data)}/{len(symbols)} symbols")
+                return coingecko_data
+            
+            # If both sources fail completely, return empty dict (NO FALLBACK)
+            self.logger.error("🚫 ALL LIVE DATA SOURCES FAILED - No fallback data will be used")
+            self.logger.error("📍 Possible solutions:")
+            self.logger.error("   1. Check internet connection")
+            self.logger.error("   2. Use VPN if APIs are blocked in your region")
+            self.logger.error("   3. Verify API keys are correct")
+            self.logger.error("   4. Check if APIs are experiencing downtime")
+            
+            return {}  # Return empty instead of fallback data
             
         except Exception as e:
-            self.logger.error(f"Error getting market data: {e}")
-            # Try file backup on error
-            return await self._load_from_file() or {}
+            self.logger.error(f"❌ Critical error in data fetching: {e}")
+            return {}  # Return empty instead of fallback data
             
     async def _fetch_from_sources(self, symbols: List[str]) -> Dict:
         """Fetch data from multiple sources with intelligent prioritization."""

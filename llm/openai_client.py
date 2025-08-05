@@ -74,7 +74,7 @@ Return ONLY a valid JSON response in this exact format:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                model="gpt-4-turbo-preview",
+                model="gpt-4o",
                 temperature=0.3,
                 max_tokens=2000
             )
@@ -152,7 +152,7 @@ Return ONLY a valid JSON response in this exact format:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                model="gpt-4-turbo-preview",
+                model="gpt-4o",
                 temperature=0.2,
                 max_tokens=2500
             )
@@ -211,7 +211,7 @@ Return ONLY a valid JSON response:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                model="gpt-4-turbo-preview",
+                model="gpt-4o",
                 temperature=0.3,
                 max_tokens=1000
             )
@@ -264,7 +264,7 @@ Return ONLY a valid JSON response:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                model="gpt-4-turbo-preview",
+                model="gpt-4o",
                 temperature=0.3,
                 max_tokens=800
             )
@@ -321,7 +321,7 @@ Return ONLY a valid JSON response:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                model="gpt-4-turbo-preview",
+                model="gpt-4o",
                 temperature=0.4,
                 max_tokens=1500
             )
@@ -347,7 +347,7 @@ Return ONLY a valid JSON response:
             self.logger.error(f"Daily overview analysis failed: {e}")
             return None
 
-    async def get_completion(self, prompt: str, model: str = "gpt-4-turbo-preview", max_tokens: int = 500) -> Optional[str]:
+    async def get_completion(self, prompt: str, model: str = "gpt-4o", max_tokens: int = 500) -> Optional[str]:
         """Get a simple text completion from OpenAI."""
         try:
             if not self.is_available() or not self.client:
@@ -374,7 +374,7 @@ Return ONLY a valid JSON response:
             self.logger.error(f"OpenAI completion failed: {e}")
             return None
 
-    async def _make_api_call(self, messages: List[Dict], model: str = "gpt-4-turbo-preview", 
+    async def _make_api_call(self, messages: List[Dict], model: str = "gpt-4o", 
                            temperature: float = 0.3, max_tokens: int = 2000) -> Optional[object]:
         """Make an API call to OpenAI with retry logic."""
         for attempt in range(self.max_retries):

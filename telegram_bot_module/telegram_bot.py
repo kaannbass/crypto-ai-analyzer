@@ -81,9 +81,7 @@ class EnhancedTelegramNotifier:
             # Add callback query handler for interactive buttons
             self.application.add_handler(CallbackQueryHandler(self.handle_callback))
             
-            # Setup command menu for better UX
-            asyncio.create_task(self.setup_command_menu())
-            
+            # Setup command menu synchronously
             self.logger.info("Telegram command handlers setup completed")
             
         except Exception as e:
@@ -1772,11 +1770,25 @@ Hoş geldiniz! Gelişmiş AI destekli kripto analiz botuna!
             return
         def _run():
             try:
+                # Create new event loop for this thread
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                # Setup command menu in the new loop
+                loop.run_until_complete(self.setup_command_menu())
+                
+                # Start polling
                 self.application.run_polling(stop_signals=None)
             except Exception as e:
                 self.logger.error(f"Telegram polling failed: {e}")
         import threading
         threading.Thread(target=_run, daemon=True).start()
+
+    async def send_news(self, news_data: List[Dict]) -> bool:
+        """Compatibility wrapper for older code paths expecting send_news().
+        Delegates to send_news_update for backward compatibility."""
+        return await self.send_news_update(news_data)
 
 
 # Global instance - Keep both for compatibility

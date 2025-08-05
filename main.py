@@ -214,27 +214,37 @@ class CryptoAnalyzer:
             self.logger.error(f"Error loading existing data: {e}")
 
     async def get_market_data(self) -> Dict:
-        """Get market data with improved fallback handling."""
+        """Get market data with LIVE DATA ONLY - no fallback."""
         try:
             # Import data manager
             from data_sources.data_manager import DataManager
             data_manager = DataManager()
             
-            # Force refresh to get fresh data
+            # Force refresh to get fresh LIVE data only
             live_data = await data_manager.get_market_data(config.SYMBOLS, force_refresh=True)
             
-            if live_data and len(live_data) >= 1:  # Relaxed requirement: at least 1 symbol
-                self.logger.info(f"✅ Retrieved market data for {len(live_data)} symbols")
-                # Save to file for web endpoint
-                await self.save_market_data(live_data)
+            if live_data and len(live_data) >= 1:  # At least 1 symbol with real data
+                self.logger.info(f"✅ Retrieved LIVE market data for {len(live_data)} symbols")
                 
-                # Check data quality
-                quality = self._assess_data_quality(live_data)
-                self.logger.info(f"📊 Data quality assessment: {quality}")
+                # Verify data is actually live (not fallback)
+                real_data_count = sum(1 for data in live_data.values() 
+                                    if data.get('source') not in ['fallback', 'mock', 'default'])
                 
-                return live_data
+                if real_data_count > 0:
+                    self.logger.info(f"✅ Confirmed {real_data_count} symbols have REAL data")
+                    # Save to file for web endpoint
+                    await self.save_market_data(live_data)
+                    
+                    # Check data quality
+                    quality = self._assess_data_quality(live_data)
+                    self.logger.info(f"📊 Data quality assessment: {quality}")
+                    
+                    return live_data
+                else:
+                    self.logger.error("❌ All data is fallback/mock - rejecting dataset")
+                    return {}
             else:
-                self.logger.error("❌ NO DATA AVAILABLE - All sources failed")
+                self.logger.error("❌ NO LIVE DATA AVAILABLE - All sources failed")
                 return {}
                 
         except Exception as e:
@@ -340,38 +350,77 @@ class CryptoAnalyzer:
         return {}
             
     async def daily_analysis(self):
-        """Perform analysis with improved data handling."""
-        self.logger.info("🔄 Starting analysis...")
+        """Perform analysis with LIVE DATA ONLY - skip if no real data."""
+        self.logger.info("🔄 Starting daily analysis with LIVE DATA requirement...")
         
         # Check if we can trade today
         if not self.risk_guard.can_trade_today():
             self.logger.info("Daily trading limits reached, skipping analysis")
             return
             
-        # Get market data (with fallback mechanisms)
+        # Get market data (LIVE ONLY)
         market_data = await self.get_market_data()
         
-        # If NO DATA AT ALL, skip analysis
+        # If NO LIVE DATA AT ALL, skip analysis completely
         if not market_data:
-            self.logger.error("❌ NO DATA AVAILABLE - Skipping all analysis")
+            self.logger.error("❌ NO LIVE DATA AVAILABLE - Skipping ALL analysis operations")
+            self.logger.error("📍 System will wait for next cycle - no trading signals will be generated")
+            
+            # Send notification about data unavailability
+            if TELEGRAM_AVAILABLE and self.telegram_notifier:
+                try:
+                    no_data_msg = (
+                        "⚠️ <b>Veri Uyarısı</b>\n\n"
+                        "❌ Canlı piyasa verilerine erişilemiyor\n"
+                        "🔄 Sistem bir sonraki döngüyü bekliyor\n\n"
+                        "📍 <b>Olası çözümler:</b>\n"
+                        "• VPN kullanın\n"
+                        "• İnternet bağlantısını kontrol edin\n"
+                        "• API anahtarlarını doğrulayın\n\n"
+                        "<i>Gerçek veriler olmadan işlem yapılmaz.</i>"
+                    )
+                    await self.telegram_notifier.send_message(no_data_msg)
+                except Exception as e:
+                    self.logger.error(f"Failed to send no-data notification: {e}")
+            
             return
         
-        self.logger.info(f"✅ Processing data for {len(market_data)} symbols")
+        self.logger.info(f"✅ Processing LIVE data for {len(market_data)} symbols")
         
-        # Generate signals using rules with LIVE data
+        # Verify all data is real (double-check)
+        real_sources = sum(1 for data in market_data.values() 
+                          if data.get('source') not in ['fallback', 'mock', 'default'])
+        
+        if real_sources == 0:
+            self.logger.error("❌ All data appears to be fallback - aborting analysis")
+            return
+        
+        self.logger.info(f"✅ Confirmed {real_sources}/{len(market_data)} symbols have real data sources")
+        
+        # Generate signals using rules with LIVE data ONLY
         rule_signals = []
         for symbol in config.SYMBOLS:
             if symbol in market_data:
-                signal = await self.rule_engine.generate_signal(symbol, market_data[symbol])
-                if signal:
-                    rule_signals.append(signal)
+                # Only process if data source is real
+                data_source = market_data[symbol].get('source', 'unknown')
+                if data_source not in ['fallback', 'mock', 'default']:
+                    signal = await self.rule_engine.generate_signal(symbol, market_data[symbol])
+                    if signal:
+                        signal['data_source'] = data_source  # Mark data source
+                        rule_signals.append(signal)
+                        self.logger.info(f"✅ Generated signal for {symbol} using {data_source} data")
+                else:
+                    self.logger.warning(f"⚠️ Skipping {symbol} - data source is {data_source}")
                     
-        # Get AI analysis if available (with LIVE data)
+        # Get AI analysis if available (with LIVE data ONLY)
         ai_signals = []
         try:
             ai_analysis = await self.ai_aggregator.get_daily_analysis(market_data)
             if ai_analysis:
                 ai_signals = ai_analysis.get('signals', [])
+                # Mark AI signals as using real data
+                for signal in ai_signals:
+                    signal['data_source'] = 'live_data_ai_analysis'
         except Exception as e:
             self.logger.warning(f"AI analysis failed: {e}")
             
@@ -385,40 +434,180 @@ class CryptoAnalyzer:
                 validated_signals.append(signal)
                 self.save_signal(signal)
         
-        self.logger.info(f"✅ Analysis complete with LIVE data. Generated {len(validated_signals)} signals")
+        if validated_signals:
+            self.logger.info(f"✅ Daily analysis complete with LIVE data. Generated {len(validated_signals)} validated signals")
+            
+            # Send success notification
+            if TELEGRAM_AVAILABLE and self.telegram_notifier:
+                try:
+                    success_msg = (
+                        f"✅ <b>Günlük Analiz Tamamlandı</b>\n\n"
+                        f"📊 {real_sources} coin için canlı veri kullanıldı\n"
+                        f"🎯 {len(validated_signals)} sinyal üretildi\n"
+                        f"🕐 {datetime.utcnow().strftime('%H:%M:%S')} UTC\n\n"
+                        f"<i>Sadece gerçek verilerle analiz yapıldı.</i>"
+                    )
+                    await self.telegram_notifier.send_message(success_msg)
+                except Exception as e:
+                    self.logger.error(f"Failed to send success notification: {e}")
+        else:
+            self.logger.warning("⚠️ No validated signals generated from live data")
+        
         return validated_signals
 
     async def hourly_telegram_update(self):
-        """Send Turkish signals to Telegram every hour."""
+        """Send consolidated Turkish signals to Telegram every hour - LIVE DATA ONLY."""
         try:
-            self.logger.info("📤 Sending hourly Telegram update...")
+            self.logger.info("📤 Preparing consolidated hourly update with LIVE DATA requirement...")
             
             if not self.telegram_notifier:
                 self.logger.warning("Telegram notifier not available")
                 return
             
-            # Get market data (with fallback mechanisms)
+            # Get market data (LIVE ONLY)
             market_data = await self.get_market_data()
             
-            # If NO DATA AT ALL, don't send anything
             if not market_data:
-                self.logger.error("❌ NO DATA - Skipping Telegram update")
-                return
+                self.logger.warning("No LIVE market data available for Telegram update")
                 
-            # Generate Turkish signals with LIVE data
-            turkish_signals = await self.telegram_notifier.get_turkish_signals()
-            
-            if turkish_signals and "❌" not in turkish_signals:  # Only send if successful
-                # Send to Telegram
-                await self.telegram_notifier.send_message(
-                    f"🕐 <b>SAATLİK CANLI SİNYAL GÜNCELLEMESİ</b>\n\n{turkish_signals} \n\n<b>Bu bildirimler yatırım tavsiyesi değildir.</b>"
+                # Send "no data" notification
+                no_data_msg = (
+                    "⚠️ <b>Veri Durumu</b>\n\n"
+                    "❌ Şu anda canlı piyasa verilerine erişilemiyor\n"
+                    "🔄 Sistem gerçek veri bekliyor\n\n"
+                    "📍 <b>Durum:</b> VPN gerekebilir\n"
+                    "🕐 Sonraki kontrol: 2 saat sonra\n\n"
+                    "<i>Sahte verilerle işlem yapılmaz.</i>"
                 )
-                self.logger.info("✅ Hourly LIVE signals sent to Telegram")
+                await self.telegram_notifier.send_message(no_data_msg)
+                return
+            
+            # Verify data is actually real
+            real_sources = sum(1 for data in market_data.values() 
+                              if data.get('source') not in ['fallback', 'mock', 'default'])
+            
+            if real_sources == 0:
+                self.logger.warning("All data appears to be fallback - sending warning")
+                
+                fallback_msg = (
+                    "⚠️ <b>Veri Kalite Uyarısı</b>\n\n"
+                    "❌ Sadece yedek veriler mevcut\n"
+                    "🚫 Gerçek piyasa verisi alınamıyor\n\n"
+                    "📍 Lütfen VPN kullanın veya bağlantıyı kontrol edin\n"
+                    "🔄 Gerçek veriler gelene kadar bekleniyor\n\n"
+                    "<i>Yedek verilerle sinyal üretilmez.</i>"
+                )
+                await self.telegram_notifier.send_message(fallback_msg)
+                return
+            
+            # Prepare consolidated summary message with REAL DATA
+            summary_parts = []
+            
+            # 1. System Status with data source info
+            total_symbols = len(market_data)
+            data_quality = f"LIVE ({real_sources}/{total_symbols} gerçek veri)"
+            summary_parts.append(f"🤖 <b>Sistem Durumu</b>\n📊 Veri Kalitesi: {data_quality}")
+            
+            # 2. Market Overview (only real data)
+            positive_count = sum(1 for symbol, data in market_data.items() 
+                               if data.get('change_24h', 0) > 0 and data.get('source') not in ['fallback', 'mock', 'default'])
+            negative_count = real_sources - positive_count
+            
+            summary_parts.append(f"📈 <b>Piyasa Özeti</b> (Canlı Veri)\n"
+                                f"• Toplam: {real_sources} coin\n"
+                                f"• Yükselişte: {positive_count} 🟢\n"
+                                f"• Düşüşte: {negative_count} 🔴")
+            
+            # 3. Top 3 Signals from REAL data only
+            try:
+                signals = []
+                for symbol in list(market_data.keys())[:5]:  # Check top 5 symbols
+                    data = market_data[symbol]
+                    # Only process if data source is real
+                    if data.get('source') not in ['fallback', 'mock', 'default']:
+                        signal = await self.rule_engine.generate_signal(symbol, data)
+                        if signal:
+                            signal['data_source'] = data.get('source', 'unknown')
+                            signals.append(signal)
+                
+                if signals:
+                    signal_text = "🎯 <b>Canlı Sinyaller</b>\n"
+                    for i, signal in enumerate(signals[:3], 1):
+                        symbol = signal.get('symbol', 'Unknown')
+                        action = signal.get('action', 'WAIT')
+                        confidence = signal.get('confidence', 0)
+                        price = signal.get('current_price', 0)
+                        source = signal.get('data_source', 'unknown')
+                        
+                        action_emoji = {'BUY': '🟢', 'SELL': '🔴', 'WAIT': '🟡'}.get(action, '⚪')
+                        confidence_text = f"{confidence:.0%}" if confidence > 0 else "Düşük"
+                        
+                        signal_text += f"{i}. {symbol} {action_emoji} {action}\n"
+                        signal_text += f"   💰 ${price:.2f} | 📊 {confidence_text}\n"
+                        signal_text += f"   📡 Kaynak: {source}\n"
+                    
+                    summary_parts.append(signal_text.strip())
+                else:
+                    summary_parts.append("🎯 <b>Sinyaller</b>\nCanlı verilerden aktif sinyal yok")
+                    
+            except Exception as e:
+                self.logger.error(f"Error generating live signals summary: {e}")
+                summary_parts.append("🎯 <b>Sinyaller</b>\nSinyal analizi yapılamadı")
+            
+            # 4. AI Status
+            ai_status = "🤖 <b>AI Durumu</b>\n"
+            if hasattr(self, 'ai_aggregator'):
+                openai_available = self.ai_aggregator.openai_client.is_available()
+                claude_available = self.ai_aggregator.claude_client.is_available()
+                
+                ai_status += f"• OpenAI: {'✅' if openai_available else '❌'}\n"
+                ai_status += f"• Claude: {'✅' if claude_available else '❌'}"
             else:
-                self.logger.error("❌ Failed to generate Turkish signals - No Telegram update sent")
+                ai_status += "• Durum: Bilinmiyor"
+            
+            summary_parts.append(ai_status)
+            
+            # 5. Data source breakdown
+            source_breakdown = {}
+            for data in market_data.values():
+                source = data.get('source', 'unknown')
+                if source not in ['fallback', 'mock', 'default']:
+                    source_breakdown[source] = source_breakdown.get(source, 0) + 1
+            
+            if source_breakdown:
+                source_text = "📡 <b>Veri Kaynakları</b>\n"
+                for source, count in source_breakdown.items():
+                    source_text += f"• {source}: {count} coin\n"
+                summary_parts.append(source_text.strip())
+            
+            # 6. Timestamp
+            from datetime import datetime
+            summary_parts.append(f"🕐 <b>Güncelleme:</b> {datetime.utcnow().strftime('%H:%M:%S')} UTC")
+            
+            # Combine all parts into single message
+            consolidated_message = "\n\n".join(summary_parts)
+            
+            # Add header
+            final_message = "📊 <b>2 SAATLİK CANLI VERİ RAPORU</b>\n" + "=" * 35 + "\n\n" + consolidated_message
+            final_message += "\n\n<i>⚡ Sadece gerçek verilerle analiz yapıldı</i>"
+            
+            # Send single consolidated message
+            success = await self.telegram_notifier.send_message(final_message)
+            
+            if success:
+                self.logger.info(f"✅ Consolidated hourly update sent successfully (using {real_sources} live sources)")
+            else:
+                self.logger.error("❌ Failed to send consolidated Telegram update")
                 
         except Exception as e:
-            self.logger.error(f"Error in hourly Telegram update: {e}")
+            self.logger.error(f"Error in consolidated hourly update: {e}")
+            # Send simple error notification
+            if self.telegram_notifier:
+                try:
+                    error_msg = f"⚠️ <b>Sistem Uyarısı</b>\n\nGüncelleme sırasında hata:\n<code>{str(e)[:100]}...</code>"
+                    await self.telegram_notifier.send_message(error_msg)
+                except:
+                    pass
 
     async def macro_sentiment_analysis(self, news_data: List = None, events_data: List = None):
         """Perform comprehensive macro sentiment analysis."""
@@ -500,50 +689,58 @@ class CryptoAnalyzer:
             return None
 
     async def news_based_analysis(self):
-        """Perform news-based market analysis."""
-        self.logger.info("Starting news-based analysis...")
-        
+        """Analyze crypto news and include in consolidated updates (no separate notifications)."""
         try:
-            # Get latest news
-            news_data = await self.get_crypto_news_data(limit=20)
+            self.logger.info("Starting news-based analysis...")
+            
+            # Get crypto news
+            news_data = await self.get_crypto_news_data(limit=15)
             
             if not news_data:
                 self.logger.warning("No news data available")
                 return
+                
+            # Analyze news sentiment
+            news_analysis = await self.analyze_news_sentiment(news_data)
             
-            # Process news for sentiment
-            if self.news_processor:
-                processed_news = self.news_processor.process_news_for_ai(news_data)
+            if news_analysis:
+                sentiment = news_analysis.get('overall_sentiment', 'neutral')
+                impact = news_analysis.get('market_impact', 'low')
                 
-                self.logger.info(f"News Analysis Summary:")
-                self.logger.info(f"  - Overall Sentiment: {processed_news.get('sentiment_summary', 'unknown')}")
-                self.logger.info(f"  - Impact Level: {processed_news.get('impact_level', 'unknown')}")
-                self.logger.info(f"  - Key Themes: {', '.join(processed_news.get('key_themes', [])[:3])}")
-                self.logger.info(f"  - Articles Processed: {processed_news.get('total_articles', 0)}")
+                self.logger.info("News Analysis Summary:")
+                self.logger.info(f"  - Overall Sentiment: {sentiment}")
+                self.logger.info(f"  - Impact Level: {impact}")
+                self.logger.info(f"  - Key Themes: {', '.join(news_analysis.get('key_themes', []))}")
+                self.logger.info(f"  - Articles Processed: {len(news_data)}")
                 
-                # Send news update to Telegram
-                if TELEGRAM_AVAILABLE:
-                    try:
-                        await self.telegram_notifier.send_news(news_data)
-                    except Exception as e:
-                        self.logger.error(f"Failed to send news to Telegram: {e}")
+                # Store news analysis for next consolidated update (don't send separate notification)
+                self._store_news_analysis(news_analysis, news_data)
                 
-                # If news sentiment is strongly bearish or bullish, trigger macro analysis
-                sentiment = processed_news.get('sentiment_summary', 'neutral')
-                impact = processed_news.get('impact_level', 'low')
-                
-                if sentiment in ['bullish', 'bearish'] and impact in ['high', 'medium']:
-                    self.logger.info(f"High-impact {sentiment} news detected, triggering macro analysis")
-                    await self.macro_sentiment_analysis(news_data=news_data)
+                # Trigger macro analysis if high-impact news
+                if impact.lower() in ['high', 'medium'] and sentiment in ['bullish', 'bearish']:
+                    self.logger.info("High-impact news detected, triggering macro analysis")
+                    await self.macro_sentiment_analysis(news_data)
                     
         except Exception as e:
-            self.logger.error(f"News-based analysis failed: {e}")
-            # Send error to Telegram
-            if TELEGRAM_AVAILABLE:
-                try:
-                    await self.telegram_notifier.send_error_notification(str(e), "News Analysis")
-                except:
-                    pass
+            self.logger.error(f"News analysis failed: {e}")
+            
+    def _store_news_analysis(self, analysis: Dict, news_data: List):
+        """Store news analysis for inclusion in consolidated updates."""
+        try:
+            news_summary = {
+                'analysis': analysis,
+                'articles_count': len(news_data),
+                'timestamp': datetime.utcnow().isoformat(),
+                'top_headlines': [article.get('title', 'No title')[:100] for article in news_data[:3]]
+            }
+            
+            # Store in data directory for consolidated updates
+            news_summary_file = f"{config.DATA_DIR}/latest_news_summary.json"
+            with open(news_summary_file, 'w') as f:
+                json.dump(news_summary, f, indent=2)
+                
+        except Exception as e:
+            self.logger.error(f"Error storing news analysis: {e}")
         
     async def hourly_scan(self):
         """Perform anomaly scan with LIVE data only."""
@@ -734,25 +931,26 @@ class CryptoAnalyzer:
             self.logger.error(f"Error saving macro analysis: {e}")
 
     async def run_scheduler(self):
-        """Run scheduler with LIVE DATA ONLY and hourly Telegram updates."""
-        self.logger.info("🚀 Starting LIVE DATA crypto analyzer (Hourly Telegram Updates)...")
+        """Enhanced scheduler with LIVE data focus and consolidated notifications."""
         self.running = True
+        self.logger.info("🚀 Starting Enhanced Scheduler with LIVE data and consolidated notifications")
         
-        # Send startup notification to Telegram
-        if self.telegram_notifier:
+        # Send startup notification
+        if TELEGRAM_AVAILABLE:
             try:
-                await self.telegram_notifier.send_startup_notification()
+                startup_msg = (
+                    "🚀 <b>Crypto AI Analyzer Başlatıldı</b>\n\n"
+                    "✅ Sistem aktif\n"
+                    "📊 Canlı veri analizi başladı\n"
+                    "🔔 2 saatte bir özet rapor gönderilecek\n\n"
+                    "<i>Bu bildirimler yatırım tavsiyesi değildir.</i>"
+                )
+                await self.telegram_notifier.send_message(startup_msg)
             except Exception as e:
                 self.logger.error(f"Failed to send startup notification: {e}")
         
-        # Initial analysis with LIVE data only
-        await self.daily_analysis()
-        
-        # Initial Telegram update
-        await self.hourly_telegram_update()
-        
-        last_hour = -1  # Track last hour for hourly updates
-        last_telegram_update = datetime.utcnow() - timedelta(hours=2)  # Initialize to 2 hours ago
+        last_hour = -1
+        last_telegram_update = datetime.utcnow() - timedelta(hours=3)  # Force first update
         
         try:
             while self.running:
@@ -760,12 +958,12 @@ class CryptoAnalyzer:
                 current_hour = current_time.hour
                 current_minute = current_time.minute
                 
-                # === HOURLY TELEGRAM UPDATE (More reliable) ===
-                # Check if at least 55 minutes have passed since last update
+                # === CONSOLIDATED TELEGRAM UPDATE (Every 2 hours) ===
                 time_since_last_update = current_time - last_telegram_update
                 
-                if (current_minute <= 5 and current_hour != last_hour) or time_since_last_update.total_seconds() >= 3300:  # 55 minutes
-                    self.logger.info(f"🕐 Starting hourly update at {current_hour:02d}:{current_minute:02d} UTC (last update: {time_since_last_update})")
+                # Send update every 2 hours or if more than 2 hours have passed
+                if (current_minute <= 5 and current_hour % 2 == 0 and current_hour != last_hour) or time_since_last_update.total_seconds() >= 7200:  # 2 hours
+                    self.logger.info(f"🕐 Starting 2-hourly consolidated update at {current_hour:02d}:{current_minute:02d} UTC")
                     await self.hourly_telegram_update()
                     last_hour = current_hour
                     last_telegram_update = current_time
@@ -778,11 +976,11 @@ class CryptoAnalyzer:
                 if current_minute in [0, 30] and current_minute < 5:
                     await self.hourly_scan()
                     
-                # === NEWS ANALYSIS (Every 4 hours) ===
+                # === NEWS ANALYSIS (Every 4 hours) - No separate notifications ===
                 if NEWS_API_AVAILABLE and current_hour % 4 == 0 and current_minute < 5:
                     await self.news_based_analysis()
                     
-                # === MACRO SENTIMENT (Every 6 hours) ===
+                # === MACRO SENTIMENT (Every 6 hours) - No separate notifications ===
                 if current_hour % 6 == 0 and current_minute < 5:
                     await self.macro_sentiment_analysis()
                     
@@ -793,10 +991,11 @@ class CryptoAnalyzer:
             self.logger.info("Received interrupt signal, shutting down...")
         except Exception as e:
             self.logger.error(f"Scheduler error: {e}")
-            # Send error to Telegram
+            # Send error to Telegram (only critical errors)
             if self.telegram_notifier:
                 try:
-                    await self.telegram_notifier.send_error_notification(str(e), "LIVE DATA Scheduler")
+                    error_msg = f"🚨 <b>Kritik Sistem Hatası</b>\n\n<code>{str(e)[:150]}...</code>\n\nSistem yeniden başlatılıyor..."
+                    await self.telegram_notifier.send_message(error_msg)
                 except:
                     pass
         finally:

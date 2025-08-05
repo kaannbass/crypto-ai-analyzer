@@ -11,6 +11,8 @@ import ssl
 from datetime import datetime
 from typing import Dict, List, Optional
 import config
+import time
+import socket
 
 
 class BinanceAPI:
@@ -46,24 +48,35 @@ class BinanceAPI:
             ssl=ssl_context,
             limit=10,
             limit_per_host=5,
-            enable_cleanup_closed=True,
-            force_close=False,
-            keepalive_timeout=30,
-            resolver=aiohttp.resolver.DefaultResolver(),
-            use_dns_cache=True
+            ttl_dns_cache=300,
+            use_dns_cache=True,
+            enable_cleanup_closed=True
         )
         
         self.session = aiohttp.ClientSession(
-            connector=connector,
             timeout=timeout,
+            connector=connector,
             headers={
-                'User-Agent': 'crypto-ai-analyzer/1.0',
+                'User-Agent': 'crypto-analyzer/1.0',
                 'Accept': 'application/json',
-                'Connection': 'keep-alive',
-                'Accept-Encoding': 'gzip, deflate'
+                'Connection': 'keep-alive'
             }
         )
         return self
+
+    def check_internet_connectivity(self) -> bool:
+        """Check basic internet connectivity."""
+        try:
+            # Try to connect to Google DNS
+            socket.create_connection(("8.8.8.8", 53), timeout=5)
+            return True
+        except (socket.error, OSError):
+            try:
+                # Try alternative DNS
+                socket.create_connection(("1.1.1.1", 53), timeout=5)
+                return True
+            except (socket.error, OSError):
+                return False
         
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         if self.session:

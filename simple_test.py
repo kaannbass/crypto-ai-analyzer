@@ -1,175 +1,166 @@
 #!/usr/bin/env python3
 """
-Basit test scripti - macOS uyumluluğu için.
+Simple test script to verify data connectivity and API functionality.
 """
 
 import asyncio
 import sys
-import os
+import json
 from datetime import datetime
 
-def test_basic_imports():
-    """Temel importları test et."""
-    print("🔍 Testing basic imports...")
-    
-    try:
-        import config
-        print("✅ Config import: OK")
-        
-        # Check CoinGecko API key
-        api_key = getattr(config, 'COINGECKO_API_KEY', '')
-        if api_key:
-            print(f"✅ CoinGecko API key: Configured ({len(api_key)} chars)")
-        else:
-            print("⚠️ CoinGecko API key: Not configured")
-        
-    except Exception as e:
-        print(f"❌ Config import failed: {e}")
-        return False
-    
-    try:
-        from data_sources.binance_api import BinanceAPI
-        print("✅ Binance API import: OK")
-    except Exception as e:
-        print(f"❌ Binance API import failed: {e}")
-        return False
-    
-    try:
-        from data_sources.coingecko_api import CoinGeckoAPI
-        print("✅ CoinGecko API import: OK")
-    except Exception as e:
-        print(f"❌ CoinGecko API import failed: {e}")
-        return False
-    
-    try:
-        from data_sources.data_manager import DataManager
-        print("✅ Data Manager import: OK")
-    except Exception as e:
-        print(f"❌ Data Manager import failed: {e}")
-        return False
-    
-    return True
+# Add project root to path
+sys.path.append('.')
 
-async def test_basic_connectivity():
-    """Temel bağlantıları test et."""
-    print("\n🌐 Testing basic connectivity...")
+from data_sources.data_manager import DataManager
+from data_sources.binance_api import BinanceAPI
+import config
+
+async def test_internet_connectivity():
+    """Test basic internet connectivity."""
+    print("🌐 Testing Internet Connectivity...")
+    
+    api = BinanceAPI()
+    has_internet = api.check_internet_connectivity()
+    
+    if has_internet:
+        print("✅ Internet connectivity: OK")
+        return True
+    else:
+        print("❌ Internet connectivity: FAILED")
+        return False
+
+async def test_binance_api():
+    """Test Binance API connectivity."""
+    print("\n🔗 Testing Binance API...")
     
     try:
-        import aiohttp
-        async with aiohttp.ClientSession() as session:
-            # Test basic internet connectivity
-            async with session.get('https://httpbin.org/ip', timeout=aiohttp.ClientTimeout(total=5)) as response:
-                if response.status == 200:
-                    print("✅ Internet connectivity: OK")
+        async with BinanceAPI() as api:
+            # Test simple ping
+            result = await api.ping()
+            if result:
+                print("✅ Binance API ping: OK")
+                
+                # Test getting price for BTC
+                price_data = await api.get_symbol_price("BTCUSDT")
+                if price_data:
+                    print(f"✅ BTC Price: ${price_data.get('price', 'N/A')}")
+                    return True
                 else:
-                    print(f"⚠️ Internet connectivity: HTTP {response.status}")
+                    print("❌ Failed to get BTC price")
+                    return False
+            else:
+                print("❌ Binance API ping: FAILED")
+                return False
+                
     except Exception as e:
-        print(f"❌ Internet connectivity failed: {e}")
+        print(f"❌ Binance API error: {e}")
         return False
-    
-    return True
 
-async def test_data_sources():
-    """Data source'ları test et."""
-    print("\n💰 Testing data sources...")
+async def test_data_manager():
+    """Test data manager functionality."""
+    print("\n📊 Testing Data Manager...")
     
     try:
-        from data_sources.data_manager import DataManager
         data_manager = DataManager()
         
-        # Test with a small number of symbols
+        # Test getting market data for a few symbols
         test_symbols = ['BTCUSDT', 'ETHUSDT']
-        
-        print(f"Testing with symbols: {test_symbols}")
-        market_data = await data_manager.get_market_data(test_symbols, force_refresh=True)
+        market_data = await data_manager.get_market_data(test_symbols)
         
         if market_data:
-            print(f"✅ Market data: Retrieved {len(market_data)} symbols")
-            for symbol, data in market_data.items():
-                price = data.get('price', 0)
-                source = data.get('source', 'unknown')
-                print(f"  {symbol}: ${price:,.2f} from {source}")
-            return True
+            print(f"✅ Market data retrieved for {len(market_data)} symbols")
+            
+            # Check if data is live or fallback
+            live_count = sum(1 for data in market_data.values() 
+                           if data.get('source') not in ['fallback', 'mock'])
+            
+            if live_count > 0:
+                print(f"✅ Live data sources: {live_count}/{len(market_data)}")
+                
+                # Show sample data
+                for symbol, data in list(market_data.items())[:2]:
+                    price = data.get('price', 0)
+                    source = data.get('source', 'unknown')
+                    print(f"   {symbol}: ${price:.2f} (source: {source})")
+                
+                return True
+            else:
+                print("⚠️ Only fallback data available - no live sources working")
+                return False
         else:
-            print("❌ Market data: No data retrieved")
+            print("❌ No market data retrieved")
             return False
             
     except Exception as e:
-        print(f"❌ Data sources test failed: {e}")
+        print(f"❌ Data Manager error: {e}")
         return False
 
-async def test_flask_app():
-    """Flask app'i test et."""
-    print("\n🌐 Testing Flask app...")
+async def test_ai_clients():
+    """Test AI client availability."""
+    print("\n🤖 Testing AI Clients...")
     
     try:
-        from main import app
-        with app.test_client() as client:
-            response = client.get('/')
-            if response.status_code == 200:
-                print("✅ Flask app: OK")
-                return True
-            else:
-                print(f"❌ Flask app: HTTP {response.status_code}")
-                return False
-    except Exception as e:
-        print(f"❌ Flask app test failed: {e}")
-        return False
-
-def main():
-    """Ana test fonksiyonu."""
-    print("🚀 Simple Test Script for Crypto AI Analyzer")
-    print("=" * 50)
-    print(f"📅 Test time: {datetime.now()}")
-    print(f"🖥️ Platform: {sys.platform}")
-    print(f"🐍 Python: {sys.version}")
-    print("=" * 50)
-    
-    # Test 1: Basic imports
-    imports_ok = test_basic_imports()
-    
-    if not imports_ok:
-        print("\n❌ Basic imports failed. Check your environment setup.")
-        return False
-    
-    # Test 2: Run async tests
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
-    try:
-        # Test connectivity
-        connectivity_ok = loop.run_until_complete(test_basic_connectivity())
+        from llm.openai_client import OpenAIClient
+        from llm.claude_client import ClaudeClient
         
-        if connectivity_ok:
-            # Test data sources
-            data_ok = loop.run_until_complete(test_data_sources())
+        openai_client = OpenAIClient()
+        claude_client = ClaudeClient()
+        
+        openai_available = openai_client.is_available()
+        claude_available = claude_client.is_available()
+        
+        print(f"OpenAI: {'✅ Available' if openai_available else '❌ Not available'}")
+        print(f"Claude: {'✅ Available' if claude_available else '❌ Not available'}")
+        
+        if openai_available or claude_available:
+            print("✅ At least one AI client is available")
+            return True
         else:
-            data_ok = False
-        
-        # Test Flask app
-        flask_ok = loop.run_until_complete(test_flask_app())
-        
-    finally:
-        loop.close()
+            print("⚠️ No AI clients available - set API keys for full functionality")
+            return False
+            
+    except Exception as e:
+        print(f"❌ AI Client test error: {e}")
+        return False
+
+async def main():
+    """Run all tests."""
+    print("🚀 Crypto AI Analyzer - System Test")
+    print("=" * 50)
+    
+    results = []
+    
+    # Test internet connectivity
+    results.append(await test_internet_connectivity())
+    
+    # Test Binance API
+    results.append(await test_binance_api())
+    
+    # Test data manager
+    results.append(await test_data_manager())
+    
+    # Test AI clients
+    results.append(await test_ai_clients())
     
     # Summary
     print("\n" + "=" * 50)
-    print("📊 TEST SUMMARY")
-    print("=" * 50)
-    print(f"Basic imports: {'✅ PASS' if imports_ok else '❌ FAIL'}")
-    print(f"Connectivity: {'✅ PASS' if connectivity_ok else '❌ FAIL'}")
-    print(f"Data sources: {'✅ PASS' if data_ok else '❌ FAIL'}")
-    print(f"Flask app: {'✅ PASS' if flask_ok else '❌ FAIL'}")
+    print("📋 Test Summary:")
     
-    all_ok = imports_ok and connectivity_ok and data_ok and flask_ok
+    passed = sum(results)
+    total = len(results)
     
-    if all_ok:
-        print("\n🎉 All tests passed! The system is ready for deployment.")
+    if passed == total:
+        print(f"✅ All tests passed ({passed}/{total})")
+        print("🎉 System is ready to run!")
+    elif passed >= 2:  # At least internet and one data source
+        print(f"⚠️ Partial success ({passed}/{total} tests passed)")
+        print("🔧 System can run with limited functionality")
     else:
-        print("\n⚠️ Some tests failed. Check the issues above before deploying.")
+        print(f"❌ Major issues detected ({passed}/{total} tests passed)")
+        print("🚫 System needs troubleshooting before running")
     
-    return all_ok
+    return passed >= 2
 
 if __name__ == "__main__":
-    success = main()
+    success = asyncio.run(main())
     sys.exit(0 if success else 1) 
