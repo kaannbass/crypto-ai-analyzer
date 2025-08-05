@@ -23,6 +23,7 @@ class OpenAIClient:
         self.api_key = config.OPENAI_API_KEY
         self.timeout = config.AI_TIMEOUT
         self.max_retries = config.AI_MAX_RETRIES
+        self.available = bool(self.api_key)
         
         if self.is_available() and OPENAI_AVAILABLE:
             self.client = openai.OpenAI(api_key=self.api_key)
@@ -626,7 +627,12 @@ Return ONLY a valid JSON response:
             
     def is_available(self) -> bool:
         """Check if OpenAI API is available."""
-        return bool(self.api_key and self.api_key.strip())
+        return self.available
+
+    def _disable(self, reason: str):
+        """Disable client after critical errors."""
+        self.available = False
+        self.logger.error(f"OpenAI client disabled: {reason}")
         
     async def test_connection(self) -> bool:
         """Test connection to OpenAI API."""
