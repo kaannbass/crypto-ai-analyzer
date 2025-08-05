@@ -782,10 +782,10 @@ Configure your notification preferences and analysis parameters.
                     trend_text = "Yükseliş" if change_24h > 0 else "Düşüş" if change_24h < 0 else "Sabit"
                     
                     price_message = f"""
-💰 <b>{symbol.replace('USDT', '/USDT')} FİYAT</b>
+💰 <b>{symbol.replace('USDT', '/USDT')} CANLI FİYAT</b>
 
-💵 <b>Fiyat:</b> ${price:,.4f}
-{trend_emoji} <b>24s:</b> {change_24h:+.2%} ({trend_text})
+💵 <b>Anlık Değer:</b> <code>${price:,.4f} USD</code> 🔴
+{trend_emoji} <b>24s Değişim:</b> {change_24h:+.2%} ({trend_text})
 
 🕒 <b>Son Güncelleme:</b> Az önce
                     """
@@ -1636,17 +1636,17 @@ Configure your notification preferences and analysis parameters.
             analysis = f"""
 🎯 <b>{symbol.replace('USDT', '/USDT')} DETAYLI ANALİZ</b>
 
-💰 <b>ANLIK FİYAT:</b> ${price:,.4f}
+💰 <b>CANLI FİYAT:</b> <code>${price:,.4f} USD</code> 🔴
 {trend_icon} <b>24s Değişim:</b> {change_24h:+.2%} ({trend_text})
 📊 <b>Son Güncelleme:</b> {time_str}
 
 📈 <b>24 SAAT VERİLERİ:</b>
-🔺 Yüksek: ${high_24h:,.4f}
-🔻 Düşük: ${low_24h:,.4f}
-📊 Ortalama: ${(high_24h + low_24h) / 2:,.4f}
+🔺 Yüksek: <code>${high_24h:,.4f} USD</code>
+🔻 Düşük: <code>${low_24h:,.4f} USD</code>
+📊 Ortalama: <code>${(high_24h + low_24h) / 2:,.4f} USD</code>
 
 💹 <b>HACIM ANALİZİ:</b>
-💵 24s Hacim: ${volume:,.0f}
+💵 24s Hacim: <code>${volume:,.0f} USD</code>
 📊 Hacim Değişimi: {volume_change:+.1%}
 {volume_status}
 
@@ -1722,10 +1722,10 @@ Configure your notification preferences and analysis parameters.
             
             # Quick price message
             price_message = f"""
-💰 <b>{symbol.replace('USDT', '/USDT')} FİYAT</b>
+💰 <b>{symbol.replace('USDT', '/USDT')} CANLI FİYAT</b>
 
-💵 <b>Fiyat:</b> ${price:,.4f}
-{trend_emoji} <b>24s:</b> {change_24h:+.2%} ({trend_text})
+💵 <b>Anlık Değer:</b> <code>${price:,.4f} USD</code> 🔴
+{trend_emoji} <b>24s Değişim:</b> {change_24h:+.2%} ({trend_text})
 
 🕒 <b>Son Güncelleme:</b> Az önce
             """
