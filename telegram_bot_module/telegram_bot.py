@@ -16,7 +16,7 @@ from rules.rule_engine import RuleEngine
 from llm.aggregator import AIAggregator
 
 try:
-    from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
+    from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
     from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
     from telegram.error import TelegramError, NetworkError, RetryAfter
     TELEGRAM_AVAILABLE = True
@@ -79,10 +79,38 @@ class EnhancedTelegramNotifier:
             # Add callback query handler for interactive buttons
             self.application.add_handler(CallbackQueryHandler(self.handle_callback))
             
+            # Setup command menu for better UX
+            asyncio.create_task(self.setup_command_menu())
+            
             self.logger.info("Telegram command handlers setup completed")
             
         except Exception as e:
             self.logger.error(f"Failed to setup Telegram application: {e}")
+
+    async def setup_command_menu(self):
+        """Setup bot command menu for better user experience."""
+        try:
+            commands = [
+                BotCommand("start", "🚀 Bot'u başlat ve hoş geldin mesajını gör"),
+                BotCommand("help", "📚 Tüm komutların detaylı listesi"),
+                BotCommand("signals", "🎯 Son AI trading sinyalleri"),
+                BotCommand("market", "📊 Güncel piyasa analizi"),
+                BotCommand("analyze", "🔍 Tek kripto detaylı analiz (örn: /analyze BTC)"),
+                BotCommand("price", "💰 Hızlı fiyat kontrol (örn: /price ETH)"),
+                BotCommand("portfolio", "📈 Portfolio takibi"),
+                BotCommand("stats", "📉 Performans istatistikleri"),
+                BotCommand("status", "⚙️ Sistem durumu"),
+                BotCommand("refresh", "🔄 Verileri yenile"),
+                BotCommand("analyze_now", "⚡ Anında analiz başlat"),
+                BotCommand("quick_stats", "⚡ Hızlı sistem durumu"),
+                BotCommand("settings", "⚙️ Bot ayarları")
+            ]
+            
+            await self.bot.set_my_commands(commands)
+            self.logger.info("✅ Bot command menu configured successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to setup command menu: {e}")
 
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command."""
@@ -93,19 +121,27 @@ class EnhancedTelegramNotifier:
             welcome_message = """
 🤖 <b>Crypto AI Analyzer Bot</b>
 
-Welcome to the advanced crypto trading analysis bot!
+Hoş geldiniz! Gelişmiş AI destekli kripto analiz botuna!
 
-<b>Available Commands:</b>
-/help - Show detailed help
-/status - System status and health
-/signals - Latest trading signals
-/market - Current market overview
-/portfolio - Portfolio tracking
-/stats - Performance statistics
-/analyze - Request custom analysis
-/settings - Bot settings
+<b>🎯 Ana Komutlar:</b>
+/signals - Son AI trading sinyalleri
+/market - Güncel piyasa analizi  
+/analyze BTC - Tek kripto detaylı analiz
+/price ETH - Hızlı fiyat kontrol
 
-🚀 <i>Ready to analyze crypto markets with AI power!</i>
+<b>📊 Takip & Analiz:</b>
+/portfolio - Portfolio takibi
+/stats - Performans istatistikleri
+/status - Sistem durumu
+
+<b>⚡ Hızlı Komutlar:</b>
+/refresh - Verileri yenile
+/analyze_now - Anında analiz
+/quick_stats - Hızlı durum
+/help - Detaylı yardım
+
+💡 <i>Komut yazarken otomatik menüden de seçebilirsiniz!</i>
+🚀 <i>AI gücüyle piyasa analizine hazır!</i>
             """
             
             # Add interactive keyboard
