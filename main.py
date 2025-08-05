@@ -508,7 +508,7 @@ class CryptoAnalyzer:
             if turkish_signals and "❌" not in turkish_signals:  # Only send if successful
                 # Send to Telegram
                 await self.telegram_notifier.send_message(
-                    f"🕐 <b>SAATLİK CANLI SİNYAL GÜNCELLEMESİ</b>\n\n{turkish_signals}"
+                    f"🕐 <b>SAATLİK CANLI SİNYAL GÜNCELLEMESİ</b>\n\n{turkish_signals} \n\n<b>Bu bildirimler yatırım tavsiyesi değildir.</b>"
                 )
                 self.logger.info("✅ Hourly LIVE signals sent to Telegram")
             else:
@@ -849,6 +849,7 @@ class CryptoAnalyzer:
         await self.hourly_telegram_update()
         
         last_hour = -1  # Track last hour for hourly updates
+        last_telegram_update = datetime.utcnow() - timedelta(hours=2)  # Initialize to 2 hours ago
         
         try:
             while self.running:
@@ -856,11 +857,15 @@ class CryptoAnalyzer:
                 current_hour = current_time.hour
                 current_minute = current_time.minute
                 
-                # === HOURLY TELEGRAM UPDATE (Every hour at minute 0-2) ===
-                if current_minute <= 2 and current_hour != last_hour:
-                    self.logger.info(f"🕐 Starting hourly update at {current_hour:02d}:{current_minute:02d} UTC")
+                # === HOURLY TELEGRAM UPDATE (More reliable) ===
+                # Check if at least 55 minutes have passed since last update
+                time_since_last_update = current_time - last_telegram_update
+                
+                if (current_minute <= 5 and current_hour != last_hour) or time_since_last_update.total_seconds() >= 3300:  # 55 minutes
+                    self.logger.info(f"🕐 Starting hourly update at {current_hour:02d}:{current_minute:02d} UTC (last update: {time_since_last_update})")
                     await self.hourly_telegram_update()
                     last_hour = current_hour
+                    last_telegram_update = current_time
                     
                 # === DAILY ANALYSIS (08:00 UTC) ===
                 if current_hour == 8 and current_minute < 5:

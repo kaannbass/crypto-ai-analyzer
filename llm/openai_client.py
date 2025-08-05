@@ -346,6 +346,33 @@ Return ONLY a valid JSON response:
             self.logger.error(f"Daily overview analysis failed: {e}")
             return None
 
+    async def get_completion(self, prompt: str, model: str = "gpt-4-turbo-preview", max_tokens: int = 500) -> Optional[str]:
+        """Get a simple text completion from OpenAI."""
+        try:
+            if not self.is_available() or not self.client:
+                self.logger.warning("OpenAI API not available for completion")
+                return None
+                
+            response = await self._make_api_call(
+                messages=[
+                    {"role": "user", "content": prompt}
+                ],
+                model=model,
+                temperature=0.3,
+                max_tokens=max_tokens
+            )
+            
+            if response and response.choices:
+                content = response.choices[0].message.content
+                self.logger.info("OpenAI completion successful")
+                return content.strip()
+            
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"OpenAI completion failed: {e}")
+            return None
+
     async def _make_api_call(self, messages: List[Dict], model: str = "gpt-4-turbo-preview", 
                            temperature: float = 0.3, max_tokens: int = 2000) -> Optional[object]:
         """Make an API call to OpenAI with retry logic."""

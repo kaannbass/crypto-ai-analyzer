@@ -216,15 +216,15 @@ class AIAggregator:
         except FileNotFoundError:
             return self.get_default_daily_prompt()
 
-    def load_macro_sentiment_prompt(self) -> str:
-        """Load macro sentiment analysis prompt template."""
+    def load_single_crypto_prompt(self) -> str:
+        """Load single cryptocurrency analysis prompt template."""
         try:
-            with open('llm/prompt_templates/macro_sentiment_prompt.md', 'r') as f:
+            with open('llm/prompt_templates/single_crypto_prompt.md', 'r') as f:
                 return f.read()
         except FileNotFoundError:
-            self.logger.warning("Macro sentiment prompt not found, using default")
-            return self.get_default_macro_prompt()
-            
+            self.logger.warning("Single crypto prompt not found, using default")
+            return self.get_default_single_crypto_prompt()
+
     def get_default_daily_prompt(self) -> str:
         """Default daily analysis prompt."""
         return """
@@ -243,6 +243,49 @@ class AIAggregator:
         - Overall market assessment
         """
 
+    def get_default_single_crypto_prompt(self) -> str:
+        """Default single crypto analysis prompt with professional structure."""
+        return """
+You are an expert cryptocurrency analyst tasked with providing detailed analysis for a single cryptocurrency.
+
+Analyze the provided cryptocurrency data using comprehensive technical analysis framework including:
+- Price action relative to 24h range
+- Volume patterns and momentum sustainability  
+- Support/resistance levels and breakout potential
+- Short-term risk assessment and volatility analysis
+
+## Output Format (Turkish)
+Provide analysis in Turkish with the following structure:
+
+### 1. Piyasa Yorumu (2-3 sentences)
+Current price situation, dominant trend, and key technical levels.
+
+### 2. Teknik Durum
+- **Momentum Değerlendirmesi**: Current momentum and sustainability
+- **Hacim Analizi**: Volume analysis and confirmation  
+- **Destek/Direnç Seviyeleri**: Key support/resistance levels
+- **Fiyat Pozisyonu**: Position within daily range
+
+### 3. Kısa Vadeli Görünüm (24-48 hours)
+Expected price direction, key levels to watch, potential scenarios.
+
+### 4. Risk Değerlendirmesi  
+- **Risk Seviyesi**: Düşük/Orta/Yüksek
+- **Risk Faktörleri**: Specific factors to monitor
+- **Pozisyon Önerisi**: Suggested approach
+
+Use professional Turkish financial terminology. Maximum 300 words. Base analysis strictly on provided data. Emphasize risk management and capital preservation.
+        """
+
+    def load_macro_sentiment_prompt(self) -> str:
+        """Load macro sentiment analysis prompt template."""
+        try:
+            with open('llm/prompt_templates/macro_sentiment_prompt.md', 'r') as f:
+                return f.read()
+        except FileNotFoundError:
+            self.logger.warning("Macro sentiment prompt not found, using default")
+            return self.get_default_macro_prompt()
+            
     def get_default_macro_prompt(self) -> str:
         """Default macro sentiment prompt."""
         return """
@@ -886,3 +929,132 @@ class AIAggregator:
             results['claude'] = False
             
         return results 
+
+    async def get_single_crypto_analysis(self, symbol: str, coin_data: Dict) -> Optional[str]:
+        """Get AI analysis for a single cryptocurrency using professional template."""
+        try:
+            # Load professional prompt template
+            prompt_template = self.load_single_crypto_prompt()
+            
+            # Prepare market data summary for the coin
+            market_summary = f"""
+CRYPTOCURRENCY: {symbol}
+CURRENT PRICE: ${coin_data.get('price', 0):,.4f}
+24H CHANGE: {coin_data.get('change_24h', 0):+.2%}
+24H HIGH: ${coin_data.get('high_24h', 0):,.4f}
+24H LOW: ${coin_data.get('low_24h', 0):,.4f}
+24H VOLUME: ${coin_data.get('volume', 0):,.0f}
+VOLUME CHANGE: {coin_data.get('volume_change_24h', 0):+.1%}
+DATA SOURCE: {coin_data.get('source', 'unknown')}
+TIMESTAMP: {coin_data.get('timestamp', 'N/A')}
+
+ADDITIONAL CALCULATIONS:
+- Price position in 24h range: {((coin_data.get('price', 0) - coin_data.get('low_24h', 0)) / max(coin_data.get('high_24h', 0) - coin_data.get('low_24h', 0), 0.0001)) * 100:.1f}%
+- Mid-range price: ${(coin_data.get('high_24h', 0) + coin_data.get('low_24h', 0)) / 2:,.4f}
+- Price vs mid-range: {((coin_data.get('price', 0) / max((coin_data.get('high_24h', 0) + coin_data.get('low_24h', 0)) / 2, 0.0001)) - 1) * 100:+.1f}%
+            """
+            
+            # Combine template with market data
+            full_prompt = f"{prompt_template}\n\n## MARKET DATA TO ANALYZE:\n{market_summary}\n\nLütfen yukarıdaki {symbol} verisini analiz et ve Türkçe yanıt ver."
+            
+            # Try both AI models
+            analyses = []
+            
+            if self.openai_client.is_available():
+                try:
+                    openai_result = await asyncio.wait_for(
+                        self.openai_client.get_completion(full_prompt), 
+                        timeout=15
+                    )
+                    if openai_result:
+                        analyses.append(("GPT-4", openai_result))
+                        self.logger.info(f"GPT-4 analysis completed for {symbol}")
+                except Exception as e:
+                    self.logger.warning(f"GPT-4 analysis failed for {symbol}: {e}")
+            
+            if self.claude_client.is_available():
+                try:
+                    claude_result = await asyncio.wait_for(
+                        self.claude_client.get_completion(full_prompt), 
+                        timeout=15
+                    )
+                    if claude_result:
+                        analyses.append(("Claude", claude_result))
+                        self.logger.info(f"Claude analysis completed for {symbol}")
+                except Exception as e:
+                    self.logger.warning(f"Claude analysis failed for {symbol}: {e}")
+            
+            if not analyses:
+                return self._generate_fallback_crypto_analysis(symbol, coin_data)
+            
+            # If we have multiple analyses, combine them
+            if len(analyses) > 1:
+                combined_analysis = f"""
+🤖 <b>AI KONSENSÜS ANALİZİ</b>
+
+<b>📊 {analyses[0][0]} Görüşü:</b>
+{analyses[0][1][:200]}...
+
+<b>🎯 {analyses[1][0]} Görüşü:</b>
+{analyses[1][1][:200]}...
+
+<b>🔗 Genel Değerlendirme:</b>
+Her iki AI modeli de {symbol} için analiz sağladı. Detaylı görüş için yukarıdaki analizleri inceleyebilirsiniz.
+                """
+                return combined_analysis.strip()
+            else:
+                # Single analysis
+                model_name, analysis = analyses[0]
+                return f"""
+🤖 <b>{model_name.upper()} AI ANALİZİ</b>
+
+{analysis}
+
+<i>AI destekli analiz - yatırım tavsiyesi değildir.</i>
+                """.strip()
+            
+        except Exception as e:
+            self.logger.error(f"Error in single crypto AI analysis: {e}")
+            return self._generate_fallback_crypto_analysis(symbol, coin_data)
+    
+    def _generate_fallback_crypto_analysis(self, symbol: str, coin_data: Dict) -> str:
+        """Generate fallback analysis when AI models are not available."""
+        price = coin_data.get('price', 0)
+        change_24h = coin_data.get('change_24h', 0)
+        volume_change = coin_data.get('volume_change_24h', 0)
+        
+        # Basic analysis based on data
+        if change_24h > 0.05:  # +5%
+            trend = "güçlü yükseliş"
+            outlook = "pozitif"
+        elif change_24h > 0.02:  # +2%
+            trend = "ılımlı yükseliş"  
+            outlook = "iyimser"
+        elif change_24h < -0.05:  # -5%
+            trend = "güçlü düşüş"
+            outlook = "negatif"
+        elif change_24h < -0.02:  # -2%
+            trend = "ılımlı düşüş"
+            outlook = "temkinli"
+        else:
+            trend = "yatay seyrediş"
+            outlook = "nötr"
+        
+        risk_level = "Yüksek" if abs(change_24h) > 0.1 else "Orta" if abs(change_24h) > 0.05 else "Düşük"
+        
+        return f"""
+🤖 <b>SİSTEM ANALİZİ</b>
+
+📊 <b>Piyasa Yorumu:</b>
+{symbol} ${price:,.4f} seviyesinde {trend} gösteriyor. 24 saatlik %{change_24h:+.1%} performans ile {outlook} bir tablo çiziyor.
+
+🔍 <b>Teknik Durum:</b>
+Mevcut fiyat seviyesi ve hacim analizi göz önünde bulundurulduğunda, kısa vadeli momentum {'pozitif' if change_24h > 0 else 'negatif' if change_24h < 0 else 'nötr'} görünüyor.
+
+⏰ <b>Kısa Vadeli Görünüm:</b>
+24-48 saat içinde {outlook} seyir bekleniyor. Hacim değişimi %{volume_change:+.1f} seviyesinde.
+
+⚠️ <b>Risk Seviyesi:</b> {risk_level}
+
+<i>Sistem analizi - yatırım tavsiyesi değildir.</i>
+        """.strip() 

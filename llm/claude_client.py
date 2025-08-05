@@ -569,3 +569,27 @@ Return ONLY a valid JSON response:
         except Exception as e:
             self.logger.error(f"Claude connection test failed: {e}")
             return False 
+
+    async def get_completion(self, prompt: str, max_tokens: int = 500) -> Optional[str]:
+        """Get a simple text completion from Claude."""
+        try:
+            if not self.is_available() or not self.client:
+                self.logger.warning("Claude API not available for completion")
+                return None
+                
+            response = await self._make_api_call(
+                system_prompt="You are a helpful cryptocurrency analyst. Provide concise, accurate responses in Turkish.",
+                user_prompt=prompt,
+                max_tokens=max_tokens
+            )
+            
+            if response and response.content:
+                content = response.content[0].text if response.content else ""
+                self.logger.info("Claude completion successful")
+                return content.strip()
+            
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"Claude completion failed: {e}")
+            return None 

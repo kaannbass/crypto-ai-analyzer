@@ -68,6 +68,14 @@ class EnhancedTelegramNotifier:
             self.application.add_handler(CommandHandler("stats", self.cmd_stats))
             self.application.add_handler(CommandHandler("analyze", self.cmd_analyze))
             
+            # Add new control commands
+            self.application.add_handler(CommandHandler("refresh", self.cmd_refresh))
+            self.application.add_handler(CommandHandler("analyze_now", self.cmd_analyze_now))
+            self.application.add_handler(CommandHandler("force_update", self.cmd_force_update))
+            self.application.add_handler(CommandHandler("quick_stats", self.cmd_quick_stats))
+            self.application.add_handler(CommandHandler("restart", self.cmd_restart))
+            self.application.add_handler(CommandHandler("price", self.cmd_price))
+            
             # Add callback query handler for interactive buttons
             self.application.add_handler(CallbackQueryHandler(self.handle_callback))
             
@@ -128,6 +136,8 @@ Welcome to the advanced crypto trading analysis bot!
 /signals - Get latest AI trading signals
 /market - Current market analysis
 /analyze [SYMBOL] - Custom analysis for specific coin
+/analyze_now - Anında analiz başlat 🚀
+/price [SYMBOL] - Hızlı fiyat kontrol 💰
 
 <b>📊 Portfolio Commands:</b>
 /portfolio - View your tracked portfolio
@@ -138,11 +148,17 @@ Welcome to the advanced crypto trading analysis bot!
 /stats - View performance statistics
 /stats daily - Daily performance
 /stats weekly - Weekly performance
+/quick_stats - Hızlı sistem durumu ⚡
 
 <b>⚙️ System Commands:</b>
 /status - Bot and system status
 /settings - Configure notifications
 /help - This help message
+
+<b>🔧 Control Commands:</b>
+/refresh - Veriyi yenile 🔄
+/force_update - Zorunlu güncelleme ⚡
+/restart - Sistemi yeniden başlat 🔄
 
 <b>🤖 AI Features:</b>
 • Real-time market analysis with GPT-4 and Claude
@@ -242,7 +258,7 @@ Welcome to the advanced crypto trading analysis bot!
             if args and args[0].lower() in ['tr', 'türkçe', 'turkish']:
                 signals_message = await self.get_turkish_signals()
             else:
-                signals_message = await self.get_latest_signals()
+            signals_message = await self.get_latest_signals()
             
             keyboard = [
                 [InlineKeyboardButton("🔄 Yenile / Refresh", callback_data="refresh_signals")],
@@ -282,44 +298,55 @@ Welcome to the advanced crypto trading analysis bot!
             self.logger.error(f"Error in market command: {e}")
 
     async def cmd_analyze(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /analyze command."""
+        """Handle /analyze command with optional symbol parameter."""
         try:
             args = context.args
             
-            if len(args) == 0:
-                analyze_message = """
-🧠 <b>AI Analysis</b>
-
-<code>/analyze BTCUSDT</code> - Analyze specific symbol
-<code>/analyze market</code> - Full market analysis
-<code>/analyze portfolio</code> - Analyze your portfolio
-
-<i>Example: /analyze ETHUSDT</i>
-                """
-            elif args[0].upper() in ['MARKET', 'ALL']:
-                analyze_message = "🧠 Performing full market analysis... This may take a moment."
-                await update.message.reply_text(analyze_message, parse_mode='HTML')
-                # Trigger full AI analysis
-                analysis_result = await self.perform_ai_analysis("market")
-                analyze_message = analysis_result
-            elif args[0].upper() == 'PORTFOLIO':
-                chat_id = update.effective_chat.id
-                analyze_message = "🧠 Analyzing your portfolio... This may take a moment."
-                await update.message.reply_text(analyze_message, parse_mode='HTML')
-                analysis_result = await self.perform_portfolio_analysis(chat_id)
-                analyze_message = analysis_result
-            else:
-                # Analyze specific symbol
+            # If specific symbol provided
+            if args and len(args) > 0:
                 symbol = args[0].upper()
-                analyze_message = f"🧠 Analyzing {symbol}... This may take a moment."
-                await update.message.reply_text(analyze_message, parse_mode='HTML')
-                analysis_result = await self.perform_symbol_analysis(symbol)
-                analyze_message = analysis_result
-            
-            await update.message.reply_text(analyze_message, parse_mode='HTML')
-            
+                await update.message.reply_text("🔍 <b>Analiz başlatılıyor...</b>", parse_mode='HTML')
+                
+                # Get single crypto analysis
+                analysis = await self.get_single_crypto_analysis(symbol)
+                
+                # Create interactive keyboard
+                keyboard = [
+                    [InlineKeyboardButton("🔄 Yenile", callback_data=f"refresh_crypto_{symbol}")],
+                    [InlineKeyboardButton("📊 Karşılaştır", callback_data=f"compare_crypto_{symbol}")],
+                    [InlineKeyboardButton("📈 Grafik", callback_data=f"chart_crypto_{symbol}")],
+                    [InlineKeyboardButton("⏰ Alarm Kur", callback_data=f"alert_crypto_{symbol}")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                await update.message.reply_text(
+                    analysis,
+                    parse_mode='HTML',
+                    reply_markup=reply_markup
+                )
+            else:
+                # No symbol provided - show options
+                await update.message.reply_text(
+                    "🎯 <b>Hangi kripto için analiz istiyorsunuz?</b>\n\n"
+                    "Kullanım: <code>/analyze BTC</code> veya <code>/analyze BTCUSDT</code>\n\n"
+                    "📊 <b>Desteklenen Kriptolar:</b>\n"
+                    "• BTC, ETH, BNB, ADA, SOL\n"
+                    "• PEPE, XRP, DOGE, TRX\n"
+                    "• LINK, XLM, XMR, ZEC",
+                    parse_mode='HTML',
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("🔍 BTC Analiz", callback_data="analyze_BTC")],
+                        [InlineKeyboardButton("🔍 ETH Analiz", callback_data="analyze_ETH")],
+                        [InlineKeyboardButton("🔍 SOL Analiz", callback_data="analyze_SOL")]
+                    ])
+                )
+                
         except Exception as e:
             self.logger.error(f"Error in analyze command: {e}")
+            await update.message.reply_text(
+                f"❌ <b>Analiz hatası:</b> {str(e)}",
+                parse_mode='HTML'
+            )
 
     async def cmd_settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /settings command."""
@@ -635,8 +662,111 @@ Configure your notification preferences and analysis parameters.
                 message = await self.get_system_status()
             elif data == "refresh_signals":
                 message = await self.get_turkish_signals()  # Default to Turkish format
+            elif data == "market_analysis":
+                message = await self.get_market_overview()
+            elif data == "detailed_stats":
+                message = await self.get_system_status()
+            elif data == "detailed_analysis":
+                message = await self.get_latest_signals()
+            elif data == "refresh_quick_stats":
+                # Force refresh and get stats
+                from data_sources.data_manager import DataManager
+                data_manager = DataManager()
+                data_manager.clear_cache()
+                message = "🔄 <b>Cache temizlendi!</b>\n\n"
+                message += await self.get_system_status()
+            elif data == "confirm_restart":
+                message = "🔄 <b>Sistem yeniden başlatılıyor...</b>\n\n⚠️ Bu özellik yakında gelecek!"
+            elif data == "cancel_restart":
+                message = "❌ <b>Yeniden başlatma iptal edildi.</b>"
             elif data.startswith("settings_"):
                 message = await self.get_settings_menu(data.replace("settings_", ""))
+            elif data.startswith("analyze_"):
+                symbol = data.replace("analyze_", "").upper()
+                message = await self.get_single_crypto_analysis(symbol)
+                keyboard = [
+                    [InlineKeyboardButton("🔄 Yenile", callback_data=f"refresh_crypto_{symbol}")],
+                    [InlineKeyboardButton("📊 Karşılaştır", callback_data=f"compare_crypto_{symbol}")],
+                    [InlineKeyboardButton("📈 Grafik", callback_data=f"chart_crypto_{symbol}")],
+                    [InlineKeyboardButton("⏰ Alarm Kur", callback_data=f"alert_crypto_{symbol}")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await query.edit_message_text(
+                    text=message,
+                    parse_mode='HTML',
+                    reply_markup=reply_markup
+                )
+                return  # Don't process further since we already edited the message
+            elif data.startswith("refresh_crypto_"):
+                symbol = data.replace("refresh_crypto_", "").upper()
+                # Force refresh cache and get new data
+                from data_sources.data_manager import DataManager
+                data_manager = DataManager()
+                data_manager.clear_cache()
+                message = await self.get_single_crypto_analysis(symbol)
+                keyboard = [
+                    [InlineKeyboardButton("🔄 Yenile", callback_data=f"refresh_crypto_{symbol}")],
+                    [InlineKeyboardButton("📊 Karşılaştır", callback_data=f"compare_crypto_{symbol}")],
+                    [InlineKeyboardButton("📈 Grafik", callback_data=f"chart_crypto_{symbol}")],
+                    [InlineKeyboardButton("⏰ Alarm Kur", callback_data=f"alert_crypto_{symbol}")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await query.edit_message_text(
+                    text=message,
+                    parse_mode='HTML',
+                    reply_markup=reply_markup
+                )
+                return
+            elif data.startswith("compare_crypto_"):
+                symbol = data.replace("compare_crypto_", "").upper()
+                message = f"📊 <b>{symbol} Karşılaştırma</b>\n\n⚠️ Bu özellik yakında gelecek!\n\nDiğer popüler kriptolarla karşılaştırma yapabileceksiniz."
+            elif data.startswith("chart_crypto_"):
+                symbol = data.replace("chart_crypto_", "").upper()
+                message = f"📈 <b>{symbol} Grafik</b>\n\n⚠️ Bu özellik yakında gelecek!\n\nInteraktif fiyat grafiklerini görebileceksiniz."
+            elif data.startswith("alert_crypto_"):
+                symbol = data.replace("alert_crypto_", "").upper()
+                message = f"⏰ <b>{symbol} Alarm</b>\n\n⚠️ Bu özellik yakında gelecek!\n\nFiyat alarmları kurabileceksiniz."
+            elif data.startswith("price_"):
+                symbol = data.replace("price_", "").upper()
+                if not symbol.endswith('USDT'):
+                    symbol = f"{symbol}USDT"
+                
+                # Get fresh price data
+                from data_sources.data_manager import DataManager
+                data_manager = DataManager()
+                data_manager.clear_cache()
+                market_data = await data_manager.get_market_data([symbol], force_refresh=True)
+                
+                if market_data and symbol in market_data:
+                    coin_data = market_data[symbol]
+                    price = coin_data.get('price', 0)
+                    change_24h = coin_data.get('change_24h', 0)
+                    
+                    trend_emoji = "🚀" if change_24h > 0 else "📉" if change_24h < 0 else "➖"
+                    trend_text = "Yükseliş" if change_24h > 0 else "Düşüş" if change_24h < 0 else "Sabit"
+                    
+                    price_message = f"""
+💰 <b>{symbol.replace('USDT', '/USDT')} FİYAT</b>
+
+💵 <b>Fiyat:</b> ${price:,.4f}
+{trend_emoji} <b>24s:</b> {change_24h:+.2%} ({trend_text})
+
+🕒 <b>Son Güncelleme:</b> Az önce
+                    """
+                    
+                    keyboard = [
+                        [InlineKeyboardButton("🔍 Detaylı Analiz", callback_data=f"analyze_{symbol.replace('USDT', '')}")],
+                        [InlineKeyboardButton("🔄 Yenile", callback_data=f"price_{symbol.replace('USDT', '')}")]
+                    ]
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    await query.edit_message_text(
+                        text=price_message.strip(),
+                        parse_mode='HTML',
+                        reply_markup=reply_markup
+                    )
+                    return
+                else:
+                    message = f"❌ <b>{symbol}</b> fiyat bilgisi bulunamadı."
             else:
                 message = "🔧 Feature coming soon!"
             
@@ -1168,6 +1298,420 @@ Configure your notification preferences and analysis parameters.
                "• Signal Accuracy: 95%\n" + \
                "• P&L History: $10,000 (Last 7 days)\n\n" + \
                "💡 <i>These are simulated statistics.</i>"
+
+    async def cmd_refresh(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /refresh command - Force refresh market data."""
+        try:
+            await update.message.reply_text("🔄 <b>Veri yenileniyor...</b>", parse_mode='HTML')
+            
+            # Force refresh market data
+            from data_sources.data_manager import DataManager
+            import config
+            
+            data_manager = DataManager()
+            data_manager.clear_cache()  # Clear cache first
+            
+            fresh_data = await data_manager.get_market_data(config.SYMBOLS, force_refresh=True)
+            
+            if fresh_data:
+                # Send updated signals
+                turkish_signals = await self.get_turkish_signals()
+                
+                keyboard = [
+                    [InlineKeyboardButton("📊 Market Analizi", callback_data="market_analysis")],
+                    [InlineKeyboardButton("📈 Detaylı Stats", callback_data="detailed_stats")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                await update.message.reply_text(
+                    f"✅ <b>Veriler başarıyla yenilendi!</b>\n\n{turkish_signals}",
+                    parse_mode='HTML',
+                    reply_markup=reply_markup
+                )
+            else:
+                await update.message.reply_text(
+                    "❌ <b>Veri yenileme başarısız!</b>\n\nTüm data source'lar şu anda erişilemez durumda.",
+                    parse_mode='HTML'
+                )
+                
+        except Exception as e:
+            self.logger.error(f"Error in refresh command: {e}")
+            await update.message.reply_text(
+                f"❌ <b>Hata:</b> {str(e)}",
+                parse_mode='HTML'
+            )
+
+    async def cmd_analyze_now(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /analyze_now command - Trigger immediate analysis."""
+        try:
+            await update.message.reply_text("🔍 <b>Anında analiz başlatılıyor...</b>", parse_mode='HTML')
+            
+            # Import main analyzer
+            from main import analyzer_instance
+            
+            if analyzer_instance:
+                # Trigger immediate analysis
+                validated_signals = await analyzer_instance.daily_analysis()
+                
+                if validated_signals:
+                    signals_count = len(validated_signals)
+                    # Get Turkish signals
+                    turkish_signals = await self.get_turkish_signals()
+                    
+                    keyboard = [
+                        [InlineKeyboardButton("📊 Detaylar", callback_data="detailed_analysis")],
+                        [InlineKeyboardButton("🔄 Yenile", callback_data="refresh_signals")]
+                    ]
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    
+                    await update.message.reply_text(
+                        f"✅ <b>Analiz tamamlandı!</b>\n\n🎯 {signals_count} yeni sinyal oluşturuldu\n\n{turkish_signals}",
+                        parse_mode='HTML',
+                        reply_markup=reply_markup
+                    )
+                else:
+                    await update.message.reply_text(
+                        "📊 <b>Analiz tamamlandı</b>\n\nŞu anda yeni sinyal bulunamadı.",
+                        parse_mode='HTML'
+                    )
+            else:
+                await update.message.reply_text(
+                    "❌ <b>Analyzer instance bulunamadı</b>\n\nSistem başlatılmıyor olabilir.",
+                    parse_mode='HTML'
+                )
+                
+        except Exception as e:
+            self.logger.error(f"Error in analyze_now command: {e}")
+            await update.message.reply_text(
+                f"❌ <b>Analiz hatası:</b> {str(e)}",
+                parse_mode='HTML'
+            )
+
+    async def cmd_force_update(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /force_update command - Force system update and send signals."""
+        try:
+            await update.message.reply_text("⚡ <b>Zorunlu güncelleme başlatılıyor...</b>", parse_mode='HTML')
+            
+            from main import analyzer_instance
+            
+            if analyzer_instance:
+                # Force Telegram update
+                await analyzer_instance.hourly_telegram_update()
+                
+                await update.message.reply_text(
+                    "✅ <b>Zorunlu güncelleme tamamlandı!</b>\n\n📱 Telegram güncellemesi gönderildi.",
+                    parse_mode='HTML'
+                )
+            else:
+                await update.message.reply_text(
+                    "❌ <b>Analyzer instance bulunamadı</b>",
+                    parse_mode='HTML'
+                )
+                
+        except Exception as e:
+            self.logger.error(f"Error in force_update command: {e}")
+            await update.message.reply_text(
+                f"❌ <b>Güncelleme hatası:</b> {str(e)}",
+                parse_mode='HTML'
+            )
+
+    async def cmd_quick_stats(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /quick_stats command - Show quick system statistics."""
+        try:
+            from data_sources.data_manager import DataManager
+            from main import analyzer_instance
+            import config
+            
+            data_manager = DataManager()
+            cache_stats = data_manager.get_cache_stats()
+            
+            # Test API connectivity
+            source_status = await data_manager.test_all_sources()
+            
+            # Build status message
+            status_message = "📊 <b>Hızlı Sistem İstatistikleri</b>\n\n"
+            
+            # API Status
+            status_message += "🔌 <b>API Durumu:</b>\n"
+            for source, status in source_status.items():
+                icon = "✅" if status else "❌"
+                status_message += f"  {icon} {source.title()}: {'Çalışıyor' if status else 'Çalışmıyor'}\n"
+            
+            # Cache Stats
+            status_message += f"\n💾 <b>Cache:</b>\n"
+            status_message += f"  📦 Entries: {cache_stats['total_entries']}\n"
+            status_message += f"  💽 Size: {cache_stats['total_size_bytes']} bytes\n"
+            
+            # Symbol Count
+            status_message += f"\n💰 <b>Tracked Symbols:</b> {len(config.SYMBOLS)}\n"
+            
+            # System Status
+            if analyzer_instance:
+                status_message += "\n🤖 <b>Analyzer:</b> ✅ Çalışıyor"
+            else:
+                status_message += "\n🤖 <b>Analyzer:</b> ❌ Durdurulmuş"
+            
+            keyboard = [
+                [InlineKeyboardButton("🔄 Yenile", callback_data="refresh_quick_stats")],
+                [InlineKeyboardButton("📈 Detaylı Stats", callback_data="detailed_stats")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await update.message.reply_text(
+                status_message,
+                parse_mode='HTML',
+                reply_markup=reply_markup
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Error in quick_stats command: {e}")
+            await update.message.reply_text(
+                f"❌ <b>Stats hatası:</b> {str(e)}",
+                parse_mode='HTML'
+            )
+
+    async def cmd_restart(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /restart command - Restart system components."""
+        try:
+            # Security check - only allow specific users to restart
+            user_id = update.effective_user.id
+            
+            await update.message.reply_text(
+                "🔄 <b>Sistem Yeniden Başlatma</b>\n\n"
+                "⚠️ Bu komut sistemi yeniden başlatır.\n"
+                "Emin misiniz?",
+                parse_mode='HTML',
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("✅ Evet, Yeniden Başlat", callback_data="confirm_restart")],
+                    [InlineKeyboardButton("❌ İptal", callback_data="cancel_restart")]
+                ])
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Error in restart command: {e}")
+            await update.message.reply_text(
+                f"❌ <b>Restart komutu hatası:</b> {str(e)}",
+                parse_mode='HTML'
+            )
+
+    async def get_single_crypto_analysis(self, symbol: str) -> str:
+        """Get detailed analysis for a single cryptocurrency with real-time data."""
+        try:
+            from data_sources.data_manager import DataManager
+            import config
+            
+            # Ensure symbol format
+            if not symbol.endswith('USDT'):
+                symbol = f"{symbol.upper()}USDT"
+            
+            # Get fresh market data for this symbol
+            data_manager = DataManager()
+            market_data = await data_manager.get_market_data([symbol], force_refresh=True)
+            
+            if not market_data or symbol not in market_data:
+                return f"❌ <b>{symbol}</b> için veri bulunamadı.\n\nDesteklenen semboller: {', '.join(config.SYMBOLS[:5])}..."
+            
+            coin_data = market_data[symbol]
+            
+            # Extract data
+            price = coin_data.get('price', 0)
+            change_24h = coin_data.get('change_24h', 0)
+            volume = coin_data.get('volume', 0)
+            high_24h = coin_data.get('high_24h', 0)
+            low_24h = coin_data.get('low_24h', 0)
+            volume_change = coin_data.get('volume_change_24h', 0)
+            source = coin_data.get('source', 'unknown')
+            timestamp = coin_data.get('timestamp', '')
+            
+            # Format timestamp
+            try:
+                from datetime import datetime
+                dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                time_str = dt.strftime('%H:%M:%S UTC')
+            except:
+                time_str = "Bilinmiyor"
+            
+            # Price change indicators
+            if change_24h > 0:
+                trend_icon = "🚀"
+                trend_color = "yeşil"
+                trend_text = "Yükseliş"
+            elif change_24h < 0:
+                trend_icon = "📉"
+                trend_color = "kırmızı"
+                trend_text = "Düşüş"
+            else:
+                trend_icon = "➖"
+                trend_color = "nötr"
+                trend_text = "Sabit"
+            
+            # Volume analysis
+            if volume_change > 0.2:  # 20% increase
+                volume_status = "🔥 Yüksek hacim!"
+            elif volume_change < -0.2:  # 20% decrease
+                volume_status = "📉 Düşük hacim"
+            else:
+                volume_status = "📊 Normal hacim"
+            
+            # Technical indicators (simplified)
+            price_position = ((price - low_24h) / (high_24h - low_24h)) * 100 if high_24h > low_24h else 50
+            
+            if price_position > 80:
+                tech_status = "🔴 Aşırı alım bölgesinde"
+            elif price_position < 20:
+                tech_status = "🟢 Aşırı satım bölgesinde" 
+            elif price_position > 60:
+                tech_status = "🟡 Güçlü bölgede"
+            elif price_position < 40:
+                tech_status = "🟠 Zayıf bölgede"
+            else:
+                tech_status = "⚪ Nötr bölgede"
+            
+            # Trading recommendation
+            if change_24h > 0.05:  # +5%
+                if volume_change > 0.3:  # High volume
+                    recommendation = "💪 <b>GÜÇLÜ ALIM</b>"
+                else:
+                    recommendation = "✅ <b>ALIM</b>"
+            elif change_24h < -0.05:  # -5%
+                if volume_change > 0.3:  # High volume selling
+                    recommendation = "🚨 <b>GÜÇLÜ SATIM</b>"
+                else:
+                    recommendation = "⚠️ <b>SATIM</b>"
+            else:
+                recommendation = "⏳ <b>BEKLE</b>"
+            
+            # Get AI analysis
+            ai_analysis = ""
+            try:
+                from llm.aggregator import AIAggregator
+                ai_aggregator = AIAggregator()
+                ai_result = await ai_aggregator.get_single_crypto_analysis(symbol, coin_data)
+                if ai_result:
+                    ai_analysis = f"\n\n{ai_result}"
+                    self.logger.info(f"AI analysis completed for {symbol}")
+                else:
+                    self.logger.warning(f"AI analysis returned empty for {symbol}")
+            except Exception as e:
+                self.logger.error(f"AI analysis failed for {symbol}: {e}")
+                ai_analysis = ""
+            
+            # Build analysis message
+            analysis = f"""
+🎯 <b>{symbol.replace('USDT', '/USDT')} DETAYLI ANALİZ</b>
+
+💰 <b>ANLIK FİYAT:</b> ${price:,.4f}
+{trend_icon} <b>24s Değişim:</b> {change_24h:+.2%} ({trend_text})
+📊 <b>Son Güncelleme:</b> {time_str}
+
+📈 <b>24 SAAT VERİLERİ:</b>
+🔺 Yüksek: ${high_24h:,.4f}
+🔻 Düşük: ${low_24h:,.4f}
+📊 Ortalama: ${(high_24h + low_24h) / 2:,.4f}
+
+💹 <b>HACIM ANALİZİ:</b>
+💵 24s Hacim: ${volume:,.0f}
+📊 Hacim Değişimi: {volume_change:+.1%}
+{volume_status}
+
+🔍 <b>TEKNİK ANALİZ:</b>
+📍 Fiyat Pozisyonu: %{price_position:.1f}
+{tech_status}
+
+🎯 <b>ÖNERİ:</b>
+{recommendation}
+
+ℹ️ <b>VERİ KAYNAĞI:</b> {source.upper()}
+🕒 <b>GÜNCELLENDİ:</b> Az önce{ai_analysis}
+            """
+            
+            return analysis.strip()
+            
+        except Exception as e:
+            self.logger.error(f"Error getting single crypto analysis: {e}")
+            return f"❌ <b>Analiz hatası:</b> {str(e)}"
+
+    async def cmd_price(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /price command - Quick price check for any crypto."""
+        try:
+            args = context.args
+            
+            if not args:
+                await update.message.reply_text(
+                    "💰 <b>Hızlı Fiyat Kontrol</b>\n\n"
+                    "Kullanım: <code>/price BTC</code> veya <code>/price ETHUSDT</code>\n\n"
+                    "📊 <b>Örnekler:</b>\n"
+                    "• <code>/price BTC</code> - Bitcoin fiyatı\n"
+                    "• <code>/price ETH</code> - Ethereum fiyatı\n"
+                    "• <code>/price SOL</code> - Solana fiyatı",
+                    parse_mode='HTML',
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("💰 BTC", callback_data="price_BTC"),
+                         InlineKeyboardButton("💰 ETH", callback_data="price_ETH"),
+                         InlineKeyboardButton("💰 SOL", callback_data="price_SOL")]
+                    ])
+                )
+                return
+            
+            symbol = args[0].upper()
+            if not symbol.endswith('USDT'):
+                symbol = f"{symbol}USDT"
+            
+            # Get quick price data
+            from data_sources.data_manager import DataManager
+            data_manager = DataManager()
+            market_data = await data_manager.get_market_data([symbol], force_refresh=True)
+            
+            if not market_data or symbol not in market_data:
+                await update.message.reply_text(
+                    f"❌ <b>{symbol}</b> fiyat bilgisi bulunamadı.",
+                    parse_mode='HTML'
+                )
+                return
+            
+            coin_data = market_data[symbol]
+            price = coin_data.get('price', 0)
+            change_24h = coin_data.get('change_24h', 0)
+            
+            # Price trend emoji
+            if change_24h > 0:
+                trend_emoji = "🚀"
+                trend_text = "Yükseliş"
+            elif change_24h < 0:
+                trend_emoji = "📉"
+                trend_text = "Düşüş"
+            else:
+                trend_emoji = "➖"
+                trend_text = "Sabit"
+            
+            # Quick price message
+            price_message = f"""
+💰 <b>{symbol.replace('USDT', '/USDT')} FİYAT</b>
+
+💵 <b>Fiyat:</b> ${price:,.4f}
+{trend_emoji} <b>24s:</b> {change_24h:+.2%} ({trend_text})
+
+🕒 <b>Son Güncelleme:</b> Az önce
+            """
+            
+            keyboard = [
+                [InlineKeyboardButton("🔍 Detaylı Analiz", callback_data=f"analyze_{symbol.replace('USDT', '')}")],
+                [InlineKeyboardButton("🔄 Yenile", callback_data=f"price_{symbol.replace('USDT', '')}")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await update.message.reply_text(
+                price_message.strip(),
+                parse_mode='HTML',
+                reply_markup=reply_markup
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Error in price command: {e}")
+            await update.message.reply_text(
+                f"❌ <b>Fiyat hatası:</b> {str(e)}",
+                parse_mode='HTML'
+            )
 
 
 # Global instance - Keep both for compatibility

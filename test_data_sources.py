@@ -61,13 +61,13 @@ async def test_binance_connection():
                 logger.info(f"    ✅ Exchange info: {symbol_count} symbols available")
             else:
                 logger.error(f"    ❌ Exchange info failed")
-            
+    
             # Test market data for key symbols
             logger.info("  - Testing market data for key symbols...")
             test_symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT']
             market_data = await binance.get_market_data(test_symbols)
-            
-            if market_data:
+    
+    if market_data:
                 logger.info(f"    ✅ Market data: Retrieved data for {len(market_data)} symbols")
                 for symbol, data in market_data.items():
                     price = data.get('price', 0)
@@ -110,7 +110,7 @@ async def test_coingecko_connection():
             if price_data:
                 logger.info(f"✅ Price data: Retrieved data for {len(price_data)} symbols")
                 for symbol, data in price_data.items():
-                    price = data.get('price', 0)
+            price = data.get('price', 0)
                     change = data.get('change_24h', 0)
                     logger.info(f"    {symbol}: ${price:,.2f} ({change:+.2%})")
             else:
@@ -151,7 +151,7 @@ async def test_data_manager():
         import config
         
         data_manager = DataManager()
-        
+                  
         # Test 1: Get market data with force refresh
         logger.info("Test 1: Get market data with force refresh...")
         start_time = time.time()
@@ -184,11 +184,11 @@ async def test_data_manager():
         
         # Test 3: Cache statistics
         logger.info("\nTest 3: Cache statistics...")
-        cache_stats = data_manager.get_cache_stats()
+    cache_stats = data_manager.get_cache_stats()
         logger.info(f"    Cache entries: {cache_stats['total_entries']}")
         logger.info(f"    Cache size: {cache_stats['total_size_bytes']} bytes")
         logger.info(f"    Cache duration: {cache_stats['cache_duration_seconds']}s")
-        
+    
         return bool(market_data)
         
     except Exception as e:
@@ -250,7 +250,7 @@ async def main():
         logger.info("🎉 At least one data source is working!")
     else:
         logger.error("💥 All data sources are failing!")
-    
+
     return binance_ok or coingecko_ok
 
 if __name__ == "__main__":
