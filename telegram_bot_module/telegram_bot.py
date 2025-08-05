@@ -258,7 +258,7 @@ Welcome to the advanced crypto trading analysis bot!
             if args and args[0].lower() in ['tr', 'türkçe', 'turkish']:
                 signals_message = await self.get_turkish_signals()
             else:
-            signals_message = await self.get_latest_signals()
+                signals_message = await self.get_latest_signals()
             
             keyboard = [
                 [InlineKeyboardButton("🔄 Yenile / Refresh", callback_data="refresh_signals")],
