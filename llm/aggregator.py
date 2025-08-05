@@ -7,7 +7,7 @@ import asyncio
 import logging
 import json
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple, Any
 
 import config
 from llm.openai_client import OpenAIClient
@@ -21,6 +21,55 @@ class AIAggregator:
         self.claude_client = ClaudeClient()
         self.confidence_threshold = 0.6  # Minimum confidence for signals
         
+    # Utility Methods for Code Deduplication
+    async def _execute_ai_task(self, model_name: str, task, timeout: int = None) -> Optional[Dict]:
+        """Execute AI task with standardized error handling and logging."""
+        timeout = timeout or config.AI_TIMEOUT
+        try:
+            result = await asyncio.wait_for(task, timeout=timeout)
+            if result and isinstance(result, dict):
+                self.logger.info(f"{model_name} analysis completed")
+                return result
+            else:
+                self.logger.warning(f"{model_name} returned invalid result")
+                return None
+        except asyncio.TimeoutError:
+            self.logger.warning(f"{model_name} analysis timed out after {timeout}s")
+            return None
+        except Exception as e:
+            self.logger.error(f"{model_name} analysis failed: {e}")
+            return None
+    
+    def _get_available_models(self) -> List[Tuple[str, object]]:
+        """Get list of available AI models."""
+        models = []
+        if self.openai_client.is_available():
+            models.append(('openai', self.openai_client))
+        if self.claude_client.is_available():
+            models.append(('claude', self.claude_client))
+        return models
+    
+    async def _run_parallel_analysis(self, analysis_method: str, *args, timeout: int = None) -> Dict[str, Any]:
+        """Run analysis on all available models in parallel."""
+        models = self._get_available_models()
+        if not models:
+            self.logger.warning("No AI models available for analysis")
+            return {}
+        
+        tasks = []
+        for model_name, client in models:
+            method = getattr(client, analysis_method)
+            task = method(*args)
+            tasks.append((model_name, self._execute_ai_task(model_name, task, timeout)))
+        
+        results = {}
+        for model_name, task in tasks:
+            result = await task
+            if result:
+                results[model_name] = result
+        
+        return results
+
     async def get_daily_analysis(self, market_data: Dict) -> Optional[Dict]:
         """Get aggregated daily analysis from all available AI models."""
         try:
@@ -28,37 +77,8 @@ class AIAggregator:
             prompt_template = self.load_daily_prompt()
             
             # Run AI analyses in parallel for better performance
-            tasks = []
+            results = await self._run_parallel_analysis('analyze_market_data', market_data, prompt_template)
             
-            if self.openai_client.is_available():
-                tasks.append(('openai', self.openai_client.analyze_market_data(market_data, prompt_template)))
-                self.logger.info("Queued OpenAI for daily analysis")
-                
-            if self.claude_client.is_available():
-                tasks.append(('claude', self.claude_client.analyze_market_data(market_data, prompt_template)))
-                self.logger.info("Queued Claude for daily analysis")
-                
-            if not tasks:
-                self.logger.warning("No AI models available for analysis")
-                return self.generate_fallback_analysis(market_data)
-                
-            # Execute analyses with extended timeout for complex analysis
-            results = {}
-            for model_name, task in tasks:
-                try:
-                    result = await asyncio.wait_for(task, timeout=config.AI_TIMEOUT * 2)
-                    if result and isinstance(result, dict):
-                        result['analysis_timestamp'] = datetime.utcnow().isoformat()
-                        result['model_source'] = model_name
-                        results[model_name] = result
-                        self.logger.info(f"{model_name} daily analysis completed with {len(result.get('signals', []))} signals")
-                    else:
-                        self.logger.warning(f"{model_name} returned invalid analysis result")
-                except asyncio.TimeoutError:
-                    self.logger.warning(f"{model_name} daily analysis timed out after {config.AI_TIMEOUT * 2}s")
-                except Exception as e:
-                    self.logger.error(f"{model_name} daily analysis failed: {e}")
-                    
             if not results:
                 self.logger.warning("All AI analyses failed, using fallback")
                 return self.generate_fallback_analysis(market_data)
@@ -103,36 +123,10 @@ class AIAggregator:
             }
             
             # Run macro analyses in parallel
-            tasks = []
+            results = await self._run_parallel_analysis('analyze_macro_sentiment', enhanced_context, prompt_template)
             
-            if self.openai_client.is_available():
-                tasks.append(('openai', self.openai_client.analyze_macro_sentiment(enhanced_context, prompt_template)))
-                
-            if self.claude_client.is_available():
-                tasks.append(('claude', self.claude_client.analyze_macro_sentiment(enhanced_context, prompt_template)))
-                
-            if not tasks:
-                self.logger.warning("No AI models available for macro analysis")
-                return None
-                
-            # Execute analyses
-            results = {}
-            for model_name, task in tasks:
-                try:
-                    result = await asyncio.wait_for(task, timeout=config.AI_TIMEOUT * 3)  # Longer timeout for macro
-                    if result and isinstance(result, dict):
-                        result['analysis_timestamp'] = datetime.utcnow().isoformat()
-                        result['model_source'] = model_name
-                        results[model_name] = result
-                        self.logger.info(f"{model_name} macro analysis completed")
-                    else:
-                        self.logger.warning(f"{model_name} returned invalid macro result")
-                except asyncio.TimeoutError:
-                    self.logger.warning(f"{model_name} macro analysis timed out")
-                except Exception as e:
-                    self.logger.error(f"{model_name} macro analysis failed: {e}")
-                    
             if not results:
+                self.logger.warning("All AI models available for macro analysis failed")
                 return None
                 
             # Aggregate macro results with enhanced logic
@@ -151,29 +145,8 @@ class AIAggregator:
                 return None
                 
             # Run news sentiment analysis in parallel
-            tasks = []
+            results = await self._run_parallel_analysis('evaluate_news_sentiment', news_data)
             
-            if self.openai_client.is_available():
-                tasks.append(('openai', self.openai_client.evaluate_news_sentiment(news_data)))
-                
-            if self.claude_client.is_available():
-                # Claude doesn't have news sentiment method in current impl, could add it
-                pass
-                
-            if not tasks:
-                return None
-                
-            # Execute analyses
-            results = {}
-            for model_name, task in tasks:
-                try:
-                    result = await asyncio.wait_for(task, timeout=config.AI_TIMEOUT)
-                    if result:
-                        results[model_name] = result
-                        self.logger.info(f"{model_name} news sentiment analysis completed")
-                except Exception as e:
-                    self.logger.error(f"{model_name} news sentiment failed: {e}")
-                    
             return results.get('openai')  # Return OpenAI result for now
             
         except Exception as e:
@@ -184,23 +157,12 @@ class AIAggregator:
         """Analyze pump events for sustainability and trading opportunities."""
         try:
             # Run pump analysis in parallel
-            tasks = []
+            results = await self._run_parallel_analysis('analyze_pump_sustainability', pump_data)
             
-            if self.openai_client.is_available():
-                tasks.append(('openai', self.openai_client.analyze_pump_sustainability(pump_data)))
-                
-            if not tasks:
-                return None
-                
-            # Execute analyses
-            for model_name, task in tasks:
-                try:
-                    result = await asyncio.wait_for(task, timeout=config.AI_TIMEOUT)
-                    if result:
-                        self.logger.info(f"{model_name} pump analysis completed")
-                        return result
-                except Exception as e:
-                    self.logger.error(f"{model_name} pump analysis failed: {e}")
+            for model_name, result in results.items():
+                if result:
+                    self.logger.info(f"{model_name} pump analysis completed")
+                    return result
                     
             return None
             
@@ -857,23 +819,8 @@ Use professional Turkish financial terminology. Maximum 300 words. Base analysis
     async def evaluate_anomalies(self, anomalies: List[Dict]) -> Dict:
         """Get AI evaluation of detected anomalies."""
         try:
-            tasks = []
+            results = await self._run_parallel_analysis('analyze_anomalies', anomalies)
             
-            if self.claude_client.is_available():
-                tasks.append(('claude', self.claude_client.analyze_anomalies(anomalies)))
-                
-            if not tasks:
-                return {}
-                
-            results = {}
-            for model_name, task in tasks:
-                try:
-                    result = await asyncio.wait_for(task, timeout=config.AI_TIMEOUT)
-                    if result:
-                        results[model_name] = result
-                except Exception as e:
-                    self.logger.error(f"{model_name} anomaly evaluation failed: {e}")
-                    
             # Return the first available result for now
             # In production, you might want to aggregate these too
             for result in results.values():

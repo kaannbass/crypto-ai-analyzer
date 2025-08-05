@@ -30,8 +30,8 @@ class EnhancedTelegramNotifier:
         self.bot = None
         self.application = None
         self.enabled = config.TELEGRAM_ENABLED and TELEGRAM_AVAILABLE
-        self.user_portfolios = {}  # Store user portfolio data
-        self.active_chats = set()  # Track active chats
+        self.user_portfolios = {}
+        self.active_chats = set()
         
         # Initialize analysis modules for real data
         self.data_manager = DataManager()
@@ -48,9 +48,9 @@ class EnhancedTelegramNotifier:
                 self.enabled = False
         else:
             if not TELEGRAM_AVAILABLE:
-                self.logger.warning("python-telegram-bot not installed")
-            elif not config.TELEGRAM_BOT_TOKEN:
-                self.logger.warning("TELEGRAM_BOT_TOKEN not configured")
+                self.logger.warning("python-telegram-bot not available")
+            else:
+                self.logger.warning("Telegram bot disabled - no token provided")
 
     def setup_application(self):
         """Setup Telegram application with command handlers."""
@@ -114,11 +114,10 @@ class EnhancedTelegramNotifier:
 
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command."""
-        try:
-            chat_id = update.effective_chat.id
-            self.active_chats.add(chat_id)
-            
-            welcome_message = """
+        chat_id = update.effective_chat.id
+        self.active_chats.add(chat_id)
+        
+        welcome_message = """
 🤖 <b>Crypto AI Analyzer Bot</b>
 
 Hoş geldiniz! Gelişmiş AI destekli kripto analiz botuna!
@@ -142,32 +141,19 @@ Hoş geldiniz! Gelişmiş AI destekli kripto analiz botuna!
 
 💡 <i>Komut yazarken otomatik menüden de seçebilirsiniz!</i>
 🚀 <i>AI gücüyle piyasa analizine hazır!</i>
-            """
-            
-            # Add interactive keyboard
-            keyboard = [
-                [InlineKeyboardButton("🎯 Son Sinyaller", callback_data="latest_signals"),
-                 InlineKeyboardButton("📊 Market Durum", callback_data="market_overview")],
-                [InlineKeyboardButton("🔍 Kripto Analiz", callback_data="crypto_analyze_menu"),
-                 InlineKeyboardButton("💰 Hızlı Fiyat", callback_data="crypto_price_menu")],
-                [InlineKeyboardButton("📈 Portfolio", callback_data="portfolio_view"),
-                 InlineKeyboardButton("⚙️ Ayarlar", callback_data="settings_menu")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await update.message.reply_text(
-                welcome_message,
-                parse_mode='HTML',
-                reply_markup=reply_markup
-            )
-            
-        except Exception as e:
-            self.logger.error(f"Error in start command: {e}")
+        """
+        
+        keyboard_data = [
+            [("🎯 Son Sinyaller", "latest_signals"), ("📊 Market Durum", "market_overview")],
+            [("🔍 Kripto Analiz", "crypto_analyze_menu"), ("💰 Hızlı Fiyat", "crypto_price_menu")],
+            [("📈 Portfolio", "portfolio_view"), ("⚙️ Ayarlar", "settings_menu")]
+        ]
+        keyboard = self._create_keyboard(keyboard_data)
+        await self._send_message(update, welcome_message, keyboard)
 
     async def cmd_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /help command."""
-        try:
-            help_message = """
+        help_message = """
 📚 <b>Crypto AI Analyzer Help</b>
 
 <b>🎯 Trading Commands:</b>
@@ -211,129 +197,53 @@ Hoş geldiniz! Gelişmiş AI destekli kripto analiz botuna!
 • Enable notifications for real-time alerts
 
 <i>Powered by advanced AI models for superior market analysis</i>
-            """
-            
-            await update.message.reply_text(help_message, parse_mode='HTML')
-            
-        except Exception as e:
-            self.logger.error(f"Error in help command: {e}")
+        """
+        await self._send_message(update, help_message)
 
     async def cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /status command."""
-        try:
-            # Get system status (you'd implement this to check your actual system)
-            status_message = await self.get_system_status()
-            
-            keyboard = [
-                [InlineKeyboardButton("🔄 Refresh", callback_data="refresh_status")],
-                [InlineKeyboardButton("📊 Detailed Stats", callback_data="detailed_stats")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await update.message.reply_text(
-                status_message,
-                parse_mode='HTML',
-                reply_markup=reply_markup
-            )
-            
-        except Exception as e:
-            self.logger.error(f"Error in status command: {e}")
+        status_message = await self.get_system_status()
+        keyboard_data = [
+            [("🔄 Refresh", "refresh_status"), ("📊 Detailed Stats", "detailed_stats")]
+        ]
+        keyboard = self._create_keyboard(keyboard_data)
+        await self._send_message(update, status_message, keyboard)
 
     async def cmd_portfolio(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /portfolio command."""
-        try:
-            chat_id = update.effective_chat.id
-            args = context.args
-            
-            if len(args) == 0:
-                # Show portfolio
-                portfolio_message = await self.get_portfolio_status(chat_id)
-            elif args[0].lower() == 'add' and len(args) >= 3:
-                # Add position
-                symbol = args[1].upper()
-                try:
-                    amount = float(args[2])
-                    await self.add_portfolio_position(chat_id, symbol, amount)
-                    portfolio_message = f"✅ Added {amount} {symbol} to your portfolio"
-                except ValueError:
-                    portfolio_message = "❌ Invalid amount. Please use a number."
-            elif args[0].lower() == 'remove' and len(args) >= 2:
-                # Remove position
-                symbol = args[1].upper()
-                await self.remove_portfolio_position(chat_id, symbol)
-                portfolio_message = f"✅ Removed {symbol} from your portfolio"
-            else:
-                portfolio_message = """
-📊 <b>Portfolio Commands:</b>
-
-<code>/portfolio</code> - View your portfolio
-<code>/portfolio add BTCUSDT 0.5</code> - Add position
-<code>/portfolio remove BTCUSDT</code> - Remove position
-
-<i>Example: /portfolio add ETHUSDT 2.5</i>
-                """
-            
-            keyboard = [
-                [InlineKeyboardButton("📈 P&L Analysis", callback_data="portfolio_pnl")],
-                [InlineKeyboardButton("🎯 Get Signals", callback_data="portfolio_signals")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await update.message.reply_text(
-                portfolio_message,
-                parse_mode='HTML',
-                reply_markup=reply_markup
-            )
-            
-        except Exception as e:
-            self.logger.error(f"Error in portfolio command: {e}")
+        chat_id = update.effective_chat.id
+        portfolio_message = await self.get_portfolio_status(chat_id)
+        keyboard_data = [
+            [("📈 P&L Analysis", "portfolio_pnl"), ("🎯 Get Signals", "portfolio_signals")]
+        ]
+        keyboard = self._create_keyboard(keyboard_data)
+        await self._send_message(update, portfolio_message, keyboard)
 
     async def cmd_signals(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /signals command with Turkish format."""
-        try:
-            # Check if user wants Turkish format
-            args = context.args
-            if args and args[0].lower() in ['tr', 'türkçe', 'turkish']:
-                signals_message = await self.get_turkish_signals()
-            else:
-                signals_message = await self.get_latest_signals()
-            
-            keyboard = [
-                [InlineKeyboardButton("🔄 Yenile / Refresh", callback_data="refresh_signals")],
-                [InlineKeyboardButton("📊 Market Analizi", callback_data="market_analysis")],
-                [InlineKeyboardButton("🇹🇷 Türkçe Format", callback_data="turkish_signals")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await update.message.reply_text(
-                signals_message,
-                parse_mode='HTML',
-                reply_markup=reply_markup
-            )
-            
-        except Exception as e:
-            self.logger.error(f"Error in signals command: {e}")
+        """Handle /signals command."""
+        args = context.args
+        if args and args[0].lower() in ['tr', 'türkçe', 'turkish']:
+            signals_message = await self.get_turkish_signals()
+        else:
+            signals_message = await self.get_latest_signals()
+        
+        keyboard_data = [
+            [("🔄 Yenile / Refresh", "refresh_signals")],
+            [("📊 Market Analizi", "market_analysis")],
+            [("🇹🇷 Türkçe Format", "turkish_signals")]
+        ]
+        keyboard = self._create_keyboard(keyboard_data)
+        await self._send_message(update, signals_message, keyboard)
 
     async def cmd_market(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /market command."""
-        try:
-            market_message = await self.get_market_overview()
-            
-            keyboard = [
-                [InlineKeyboardButton("📈 Price Alerts", callback_data="price_alerts")],
-                [InlineKeyboardButton("📰 News Impact", callback_data="news_impact")],
-                [InlineKeyboardButton("🧠 AI Analysis", callback_data="ai_analysis")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await update.message.reply_text(
-                market_message,
-                parse_mode='HTML',
-                reply_markup=reply_markup
-            )
-            
-        except Exception as e:
-            self.logger.error(f"Error in market command: {e}")
+        market_message = await self.get_market_overview()
+        keyboard_data = [
+            [("📈 Price Alerts", "price_alerts"), ("📰 News Impact", "news_impact")],
+            [("🧠 AI Analysis", "ai_analysis")]
+        ]
+        keyboard = self._create_keyboard(keyboard_data)
+        await self._send_message(update, market_message, keyboard)
 
     async def cmd_analyze(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /analyze command with optional symbol parameter."""
@@ -386,50 +296,23 @@ Hoş geldiniz! Gelişmiş AI destekli kripto analiz botuna!
 
     async def cmd_settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /settings command."""
-        try:
-            settings_message = """
-⚙️ <b>Bot Settings</b>
-
-Configure your notification preferences and analysis parameters.
-            """
-            
-            keyboard = [
-                [InlineKeyboardButton("🔔 Notifications", callback_data="settings_notifications")],
-                [InlineKeyboardButton("🎯 Signal Filters", callback_data="settings_signals")],
-                [InlineKeyboardButton("📊 Portfolio Settings", callback_data="settings_portfolio")],
-                [InlineKeyboardButton("⏰ Timing Settings", callback_data="settings_timing")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await update.message.reply_text(
-                settings_message,
-                parse_mode='HTML',
-                reply_markup=reply_markup
-            )
-            
-        except Exception as e:
-            self.logger.error(f"Error in settings command: {e}")
+        settings_message = "⚙️ <b>Bot Settings</b>\n\nConfigure your preferences:"
+        keyboard_data = [
+            [("🔔 Notifications", "settings_notifications"), ("🎯 Signal Filters", "settings_signals")],
+            [("📊 Portfolio Settings", "settings_portfolio"), ("⏰ Timing Settings", "settings_timing")]
+        ]
+        keyboard = self._create_keyboard(keyboard_data)
+        await self._send_message(update, settings_message, keyboard)
 
     async def cmd_stats(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /stats command."""
-        try:
-            stats_message = await self.get_performance_stats()
-            
-            keyboard = [
-                [InlineKeyboardButton("📈 Signal Accuracy", callback_data="stats_accuracy")],
-                [InlineKeyboardButton("💰 P&L History", callback_data="stats_pnl")],
-                [InlineKeyboardButton("🤖 AI Performance", callback_data="stats_ai")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await update.message.reply_text(
-                stats_message,
-                parse_mode='HTML',
-                reply_markup=reply_markup
-            )
-            
-        except Exception as e:
-            self.logger.error(f"Error in stats command: {e}")
+        stats_message = await self.get_performance_stats()
+        keyboard_data = [
+            [("📈 Signal Accuracy", "stats_accuracy"), ("💰 P&L History", "stats_pnl")],
+            [("🤖 AI Performance", "stats_ai")]
+        ]
+        keyboard = self._create_keyboard(keyboard_data)
+        await self._send_message(update, stats_message, keyboard)
 
     async def get_turkish_signals(self) -> str:
         """Get trading signals in Turkish format with real data."""
@@ -1830,6 +1713,56 @@ Configure your notification preferences and analysis parameters.
             keyboard.append(row)
         
         return InlineKeyboardMarkup(keyboard)
+
+    # Utility Methods for Reducing Code Duplication
+    def _create_button(self, text: str, callback_data: str) -> InlineKeyboardButton:
+        """Create a single inline keyboard button."""
+        return InlineKeyboardButton(text, callback_data=callback_data)
+    
+    def _create_keyboard(self, buttons: List[List[tuple]]) -> InlineKeyboardMarkup:
+        """Create inline keyboard from button data."""
+        keyboard = []
+        for row in buttons:
+            keyboard_row = []
+            for text, callback_data in row:
+                keyboard_row.append(self._create_button(text, callback_data))
+            keyboard.append(keyboard_row)
+        return InlineKeyboardMarkup(keyboard)
+    
+    async def _send_message(self, update: Update, message: str, keyboard: Optional[InlineKeyboardMarkup] = None):
+        """Standardized message sending with error handling."""
+        try:
+            await update.message.reply_text(
+                message, 
+                parse_mode='HTML', 
+                reply_markup=keyboard
+            )
+        except Exception as e:
+            self.logger.error(f"Error sending message: {e}")
+            await update.message.reply_text("❌ Mesaj gönderilirken hata oluştu.")
+    
+    async def _edit_message(self, query, message: str, keyboard: Optional[InlineKeyboardMarkup] = None):
+        """Standardized message editing with error handling.""" 
+        try:
+            await query.edit_message_text(
+                text=message,
+                parse_mode='HTML',
+                reply_markup=keyboard
+            )
+        except Exception as e:
+            self.logger.error(f"Error editing message: {e}")
+    
+    def _handle_command_error(self, command_name: str):
+        """Decorator for command error handling."""
+        def decorator(func):
+            async def wrapper(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+                try:
+                    return await func(self, update, context)
+                except Exception as e:
+                    self.logger.error(f"Error in {command_name} command: {e}")
+                    await self._send_message(update, f"❌ <b>{command_name} hatası:</b> {str(e)}")
+            return wrapper
+        return decorator
 
 
 # Global instance - Keep both for compatibility

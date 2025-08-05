@@ -1,15 +1,12 @@
 """
-Main orchestrator for the crypto analysis and trading signal system.
-Handles time-based triggers and coordinates all system components.
-Enhanced with WebSocket real-time data integration and Telegram notifications.
-Cross-platform compatible deployment ready with Flask web server.
+Main orchestrator for crypto analysis and trading signal system.
+Coordinates all system components with Flask web server.
 """
 
 import asyncio
 import json
 import logging
 import os
-import platform
 import time
 import threading
 from datetime import datetime, timedelta
@@ -24,104 +21,32 @@ from llm.aggregator import AIAggregator
 from scheduler.time_trigger import TimeTrigger
 from pump_scanner.pump_detector import PumpDetector
 from binance_websocket_client import BinanceWebSocketClient
+from data_sources.news_processor import NewsProcessor, NEWS_API_AVAILABLE
 
-# Import news API
-try:
-    from data_sources.news_api import CryptoNewsAPI
-    NEWS_API_AVAILABLE = True
-    
-    class NewsProcessor:
-        """Simple news processor wrapper."""
-        async def get_crypto_news(self, limit=20):
-            async with CryptoNewsAPI() as news_api:
-                return await news_api.get_crypto_news(limit)
-        
-        def process_news_for_ai(self, news_data):
-            """Basic news processing."""
-            if not news_data:
-                return {"sentiment_summary": "neutral", "impact_level": "low", "key_themes": [], "total_articles": 0}
-            
-            # Simple sentiment analysis based on keywords
-            positive_keywords = ["surge", "rally", "bull", "gain", "rise", "up", "positive", "adoption"]
-            negative_keywords = ["drop", "fall", "crash", "bear", "down", "negative", "ban", "hack"]
-            
-            positive_count = 0
-            negative_count = 0
-            
-            for article in news_data:
-                title = article.get('title', '').lower()
-                for keyword in positive_keywords:
-                    if keyword in title:
-                        positive_count += 1
-                for keyword in negative_keywords:
-                    if keyword in title:
-                        negative_count += 1
-            
-            if positive_count > negative_count:
-                sentiment = "bullish"
-            elif negative_count > positive_count:
-                sentiment = "bearish"
-            else:
-                sentiment = "neutral"
-                
-            impact = "high" if len(news_data) > 15 else "medium" if len(news_data) > 5 else "low"
-            
-            return {
-                "sentiment_summary": sentiment,
-                "impact_level": impact,
-                "key_themes": ["crypto", "market", "trading"],
-                "total_articles": len(news_data)
-            }
-    
-except ImportError:
-    NEWS_API_AVAILABLE = False
-    
-    class NewsProcessor:
-        async def get_crypto_news(self, limit=20):
-            return []
-        def process_news_for_ai(self, news_data):
-            return {"sentiment_summary": "neutral", "impact_level": "low", "key_themes": [], "total_articles": 0}
-
-# Import Telegram bot with Turkish format
+# Telegram Bot
 try:
     from telegram_bot_module.telegram_bot import EnhancedTelegramNotifier
     TELEGRAM_AVAILABLE = True
 except ImportError:
     TELEGRAM_AVAILABLE = False
 
-# Flask app for Render.com
+# Flask app for deployment
 app = Flask(__name__)
-
-# Global analyzer instance
 analyzer_instance = None
 
 @app.route('/')
 def home():
-    """Home endpoint for Render health check."""
+    """Home endpoint."""
     return jsonify({
         "status": "running",
         "service": "Crypto AI Analyzer",
         "version": "2.0.0",
-        "features": [
-            "Turkish Trading Signals",
-            "Real-time Market Data",
-            "AI Analysis (OpenAI + Claude)",
-            "Telegram Notifications",
-            "Risk Management",
-            "Pump Detection"
-        ],
-        "endpoints": [
-            "/health",
-            "/signals",
-            "/signals/turkish",
-            "/status",
-            "/market-data"
-        ]
+        "endpoints": ["/health", "/signals", "/signals/turkish", "/status", "/market-data"]
     })
 
 @app.route('/health')
 def health_check():
-    """Health check endpoint for Render."""
+    """Health check endpoint."""
     global analyzer_instance
     status = {
         "status": "healthy",
@@ -134,118 +59,96 @@ def health_check():
         }
     }
     
-    # Check if all critical components are working
-    if all([status["components"]["analyzer"]]):
-        return jsonify(status), 200
-    else:
+    if not status["components"]["analyzer"]:
         status["status"] = "degraded"
         return jsonify(status), 503
+    return jsonify(status), 200
+
+def _get_signals_from_file(count: int = 5) -> List[Dict]:
+    """Helper function to get signals from file."""
+    if not os.path.exists(config.SIGNALS_FILE):
+        return []
+    
+    try:
+        with open(config.SIGNALS_FILE, 'r') as f:
+            all_signals = json.load(f)
+            return all_signals[-count:] if all_signals else []
+    except Exception:
+        return []
 
 @app.route('/signals')
 def get_signals():
-    """Get latest trading signals (English format)."""
+    """Get latest trading signals."""
     try:
-        global analyzer_instance
-        if not analyzer_instance:
-            return jsonify({"error": "Analyzer not initialized"}), 503
-            
-        # Get recent signals from file
-        signals = []
-        if os.path.exists(config.SIGNALS_FILE):
-            with open(config.SIGNALS_FILE, 'r') as f:
-                all_signals = json.load(f)
-                # Get last 5 signals
-                signals = all_signals[-5:] if all_signals else []
-        
+        signals = _get_signals_from_file()
         return jsonify({
             "signals": signals,
             "count": len(signals),
             "timestamp": datetime.utcnow().isoformat()
         })
-        
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route('/signals/turkish')
 def get_turkish_signals():
-    """Get Turkish format trading signals."""
+    """Get Turkish format signals."""
     try:
-        global analyzer_instance
-        if not analyzer_instance or not analyzer_instance.telegram_notifier:
-            return jsonify({"error": "Telegram notifier not available"}), 503
-            
-        # Get Turkish signals synchronously (load from file)
-        # Since this is a Flask route, we can't use async directly
-        try:
-            # Try to get latest Turkish signals from cached file
-            turkish_file = f"{config.DATA_DIR}/turkish_signals.json"
-            if os.path.exists(turkish_file):
-                with open(turkish_file, 'r', encoding='utf-8') as f:
-                    cached_signals = json.load(f)
-                    return jsonify({
-                        "signals": cached_signals.get("content", "📊 Türkçe sinyaller yükleniyor..."),
-                        "format": "Turkish", 
-                        "timestamp": cached_signals.get("timestamp", datetime.utcnow().isoformat()),
-                        "cached": True
-                    })
-            else:
-                # Return a placeholder if no cached signals
-                return jsonify({
-                    "signals": "🔄 Türkçe sinyaller hazırlanıyor... Lütfen birkaç dakika sonra tekrar deneyin.",
-                    "format": "Turkish",
-                    "timestamp": datetime.utcnow().isoformat(),
-                    "cached": False
-                })
-        except Exception as e:
-            return jsonify({"error": f"Cache read error: {str(e)}"}), 500
+        signals = _get_signals_from_file()
+        # Convert to Turkish format
+        turkish_signals = []
+        for signal in signals:
+            turkish_signal = {
+                "sembol": signal.get("symbol", ""),
+                "sinyal": signal.get("signal", ""),
+                "fiyat": signal.get("price", 0),
+                "zaman": signal.get("timestamp", ""),
+                "güven_seviyesi": signal.get("confidence", 0)
+            }
+            turkish_signals.append(turkish_signal)
         
+        return jsonify({
+            "sinyaller": turkish_signals,
+            "toplam": len(turkish_signals),
+            "zaman": datetime.utcnow().isoformat()
+        })
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"hata": str(e)}), 500
 
 @app.route('/status')
 def get_status():
     """Get system status."""
-    global analyzer_instance
-    
-    status = {
-        "system": {
-            "running": analyzer_instance is not None and analyzer_instance.running,
-            "uptime": time.time() - analyzer_instance.start_time if analyzer_instance else 0,
-            "symbols_monitored": len(config.SYMBOLS)
-        },
-        "data_sources": {
-            "binance_api": True,  # Always try Binance
-            "coingecko_api": True,  # Fallback
-            "news_api": NEWS_API_AVAILABLE,
-            "websocket": analyzer_instance.websocket_client is not None if analyzer_instance else False
-        },
-        "ai_models": {
-            "openai": bool(config.OPENAI_API_KEY),
-            "claude": bool(config.CLAUDE_API_KEY)
-        },
-        "notifications": {
-            "telegram_enabled": TELEGRAM_AVAILABLE and config.TELEGRAM_ENABLED,
-            "telegram_configured": bool(config.TELEGRAM_BOT_TOKEN)
-        }
-    }
-    
-    return jsonify(status)
+    try:
+        global analyzer_instance
+        if not analyzer_instance:
+            return jsonify({"error": "Analyzer not initialized"}), 503
+        
+        return jsonify({
+            "uptime": time.time() - analyzer_instance.start_time,
+            "running": analyzer_instance.running,
+            "last_analysis": getattr(analyzer_instance, 'last_analysis_time', None),
+            "components": {
+                "telegram": TELEGRAM_AVAILABLE,
+                "news_api": NEWS_API_AVAILABLE,
+                "websocket": analyzer_instance.websocket_client is not None
+            }
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/market-data')
 def get_market_data():
     """Get current market data."""
     try:
-        # Load latest market data from file if available
-        if os.path.exists(f"{config.DATA_DIR}/prices.json"):
-            with open(f"{config.DATA_DIR}/prices.json", 'r') as f:
-                market_data = json.load(f)
-                return jsonify({
-                    "market_data": market_data,
-                    "timestamp": datetime.utcnow().isoformat()
-                })
-        else:
-            return jsonify({"error": "No market data available"}), 404
-            
+        global analyzer_instance
+        if not analyzer_instance:
+            return jsonify({"error": "Analyzer not initialized"}), 503
+        
+        # Get recent market data from data manager
+        market_data = asyncio.run(analyzer_instance.get_market_data())
+        return jsonify({
+            "market_data": market_data,
+            "timestamp": datetime.utcnow().isoformat()
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
