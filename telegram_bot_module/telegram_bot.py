@@ -42,6 +42,8 @@ class EnhancedTelegramNotifier:
             try:
                 self.bot = Bot(token=config.TELEGRAM_BOT_TOKEN)
                 self.setup_application()
+                # Start polling in background
+                self.start()
                 self.logger.info("Enhanced Telegram bot initialized successfully")
             except Exception as e:
                 self.logger.error(f"Failed to initialize Telegram bot: {e}")
@@ -1763,6 +1765,18 @@ Hoş geldiniz! Gelişmiş AI destekli kripto analiz botuna!
                     await self._send_message(update, f"❌ <b>{command_name} hatası:</b> {str(e)}")
             return wrapper
         return decorator
+
+    def start(self):
+        """Start Telegram polling in a background thread."""
+        if not self.enabled or not self.application:
+            return
+        def _run():
+            try:
+                self.application.run_polling(stop_signals=None)
+            except Exception as e:
+                self.logger.error(f"Telegram polling failed: {e}")
+        import threading
+        threading.Thread(target=_run, daemon=True).start()
 
 
 # Global instance - Keep both for compatibility
