@@ -39,7 +39,7 @@ class ClaudeClient:
         try:
             if not self.is_available() or not self.client:
                 self.logger.warning("Claude API not available")
-                return self.generate_mock_analysis(market_data)
+                return None
                 
             # Prepare market data for analysis
             market_summary = self.prepare_market_data(market_data)
@@ -90,21 +90,20 @@ Return ONLY a valid JSON response in this exact format:
                     return analysis
                 except json.JSONDecodeError as e:
                     self.logger.error(f"Failed to parse Claude response: {e}")
-                    return self.generate_mock_analysis(market_data)
+                    return None
             
             return None
             
         except Exception as e:
             self.logger.error(f"Claude analysis failed: {e}")
-            return self.generate_mock_analysis(market_data)
+            return None  # Return None instead of mock data
         
     async def analyze_macro_sentiment(self, enhanced_context: Dict, prompt_template: str) -> Optional[Dict]:
         """Analyze market data with macro sentiment and global events using Claude API."""
         try:
-            if not self.is_available() or not self.client:
+            if not self.is_available():
                 self.logger.warning("Claude API key not available for macro analysis")
-                market_data = enhanced_context.get('market_data', {})
-                return self.generate_mock_macro_analysis(market_data, enhanced_context)
+                return None # Return None instead of mock data
                 
             # Prepare enhanced context
             context_data = json.dumps(enhanced_context, indent=2)
@@ -164,116 +163,14 @@ Return ONLY a valid JSON response in this exact format:
                     return analysis
                 except json.JSONDecodeError as e:
                     self.logger.error(f"Failed to parse Claude macro response: {e}")
-                    market_data = enhanced_context.get('market_data', {})
-                    return self.generate_mock_macro_analysis(market_data, enhanced_context)
+                    return None
             
             return None
             
         except Exception as e:
             self.logger.error(f"Claude macro sentiment analysis failed: {e}")
-            market_data = enhanced_context.get('market_data', {})
-            return self.generate_mock_macro_analysis(market_data, enhanced_context)
+            return None
 
-    def generate_mock_macro_analysis(self, market_data: Dict, context: Dict) -> Dict:
-        """Generate mock macro sentiment analysis for testing (Claude perspective)."""
-        signals = []
-        abnormal_coins = []
-        
-        for symbol, data in market_data.items():
-            price_change = data.get('change_24h', 0)
-            volume_change = data.get('volume_change_24h', 0)
-            current_price = data.get('price', 0)
-            
-            # Claude's more conservative approach
-            if price_change > 0.07 and volume_change > 0.3:  # Higher threshold for BUY
-                action = 'BUY'
-                confidence = 0.7
-                reason = f"Strong bullish confirmation with significant volume (+{volume_change*100:.1f}%)"
-            elif price_change < -0.07 and volume_change > 0.3:  # Higher threshold for SELL
-                action = 'SELL'
-                confidence = 0.65
-                reason = f"Bearish breakdown confirmed by volume spike"
-            elif abs(price_change) > 0.1:  # Very extreme moves
-                action = 'WAIT'
-                confidence = 0.5
-                reason = f"Extreme volatility ({price_change*100:.1f}%) requires caution"
-                
-                # Add to abnormal coins with more detailed analysis
-                movement_type = 'pump' if price_change > 0.1 else 'dump' if price_change < -0.1 else 'wave'
-                abnormal_coins.append({
-                    'symbol': symbol,
-                    'movement': movement_type,
-                    'magnitude': f"{price_change*100:+.1f}%",
-                    'reason': f'Unusual {movement_type} pattern with {volume_change*100:+.1f}% volume change'
-                })
-            else:
-                action = 'WAIT'
-                confidence = 0.25
-                reason = "Insufficient signal strength for confident directional bias"
-            
-            # More conservative stop losses
-            if action == 'BUY':
-                stop_loss = current_price * 0.96  # 4% stop loss
-                take_profit = current_price * 1.05  # 5% take profit
-            elif action == 'SELL':
-                stop_loss = current_price * 1.04  # 4% stop loss for short
-                take_profit = current_price * 0.95  # 5% take profit for short
-            else:
-                stop_loss = current_price
-                take_profit = current_price
-            
-            signals.append({
-                'symbol': symbol,
-                'action': action,
-                'confidence': confidence,
-                'reason': reason,
-                'confidence_level': 'High' if confidence > 0.65 else 'Medium' if confidence > 0.4 else 'Low',
-                'entry_price': current_price,
-                'stop_loss': stop_loss,
-                'take_profit': take_profit
-            })
-        
-        # More nuanced sentiment analysis
-        positive_changes = sum(1 for symbol, data in market_data.items() if data.get('change_24h', 0) > 0)
-        strong_positive = sum(1 for symbol, data in market_data.items() if data.get('change_24h', 0) > 0.05)
-        total_coins = len(market_data)
-        
-        if strong_positive / total_coins > 0.5:
-            short_term = 'Bullish'
-            medium_term = 'Bullish'
-            volatility = 'High'
-        elif positive_changes / total_coins < 0.3:
-            short_term = 'Bearish'
-            medium_term = 'Bearish'
-            volatility = 'High'
-        else:
-            short_term = 'Neutral'
-            medium_term = 'Neutral'
-            volatility = 'Moderate'
-        
-        return {
-            'model': 'claude-3-mock',
-            'summary': f"Market analysis reveals {short_term.lower()} bias with {strong_positive} coins showing strong momentum. Risk-adjusted positioning recommended given current volatility environment.",
-            'market_sentiment': {
-                'short_term': short_term,
-                'medium_term': medium_term,
-                'confidence': 'Medium'
-            },
-            'signals': signals,
-            'volatility': volatility,
-            'abnormal_coins': abnormal_coins[:3],  # Top 3 abnormal movements
-            'macro_factors': {
-                'primary_risk': 'Central bank policy divergence creating cross-asset volatility',
-                'opportunities': ['Layer 2 scaling adoption', 'Corporate treasury diversification'],
-                'global_events': ['ECB policy meeting', 'Regulatory framework developments']
-            },
-            'risk_assessment': {
-                'market_risk': 'Medium',
-                'liquidity_risk': 'Low',
-                'regulatory_risk': 'High'
-            }
-        }
-        
     async def evaluate_risk_factors(self, market_data: Dict, external_factors: Dict = None) -> Optional[Dict]:
         """Evaluate comprehensive risk factors."""
         try:
@@ -434,115 +331,6 @@ Return ONLY a valid JSON response:
             
         return summary
 
-    def generate_mock_analysis(self, market_data: Dict) -> Dict:
-        """Generate mock analysis for market data."""
-        signals = []
-        
-        for symbol, data in market_data.items():
-            price_change = data.get('change_24h', 0)
-            current_price = data.get('price', 0)
-            
-            # Claude tends to be more conservative
-            if price_change > 0.03:  # 3% threshold
-                action = 'BUY'
-                confidence = min(0.7, 0.5 + abs(price_change))
-                reason = f"Positive momentum (+{price_change*100:.1f}%) with controlled risk"
-            elif price_change < -0.03:
-                action = 'SELL'
-                confidence = min(0.65, 0.5 + abs(price_change))
-                reason = f"Bearish trend ({price_change*100:.1f}%) suggests downside"
-            else:
-                action = 'WAIT'
-                confidence = 0.4
-                reason = "Sideways action - waiting for clearer directional signal"
-            
-            signals.append({
-                'symbol': symbol,
-                'action': action,
-                'confidence': confidence,
-                'reasoning': reason,
-                'entry_price': current_price,
-                'stop_loss': current_price * (0.98 if action == 'BUY' else 1.02),
-                'take_profit': current_price * (1.03 if action == 'BUY' else 0.97)
-            })
-        
-        return {
-            'model': 'claude-3-mock',
-            'signals': signals,
-            'market_sentiment': 'Neutral',
-            'risk_level': 'Medium',
-            'summary': 'Conservative analysis focusing on risk management and clear signals only.'
-        }
-
-    def generate_mock_macro_analysis(self, market_data: Dict, context: Dict) -> Dict:
-        """Generate mock macro sentiment analysis for testing."""
-        signals = []
-        
-        # Claude's conservative approach to macro analysis
-        for symbol, data in market_data.items():
-            price_change = data.get('change_24h', 0)
-            current_price = data.get('price', 0)
-            
-            # More conservative thresholds for macro analysis
-            if price_change > 0.04:  # 4% threshold for macro signals
-                action = 'BUY'
-                confidence = min(0.65, 0.4 + abs(price_change))
-                reason = f"Macro factors support upside with {price_change*100:.1f}% momentum"
-            elif price_change < -0.04:
-                action = 'SELL'
-                confidence = min(0.6, 0.4 + abs(price_change))
-                reason = f"Macro headwinds suggest caution with {price_change*100:.1f}% decline"
-            else:
-                action = 'WAIT'
-                confidence = 0.3
-                reason = "Macro environment mixed - waiting for clearer catalyst"
-            
-            signals.append({
-                'symbol': symbol,
-                'action': action,
-                'confidence': confidence,
-                'reasoning': reason
-            })
-        
-        # Conservative macro assessment
-        positive_changes = sum(1 for symbol, data in market_data.items() if data.get('change_24h', 0) > 0)
-        total_coins = len(market_data) if market_data else 1
-        
-        if positive_changes / total_coins > 0.65:
-            short_term = 'Bullish'
-            medium_term = 'Neutral'
-            confidence = 'Medium'
-        elif positive_changes / total_coins < 0.35:
-            short_term = 'Bearish'
-            medium_term = 'Neutral'
-            confidence = 'Medium'
-        else:
-            short_term = 'Neutral'
-            medium_term = 'Neutral'
-            confidence = 'Low'
-        
-        return {
-            'model': 'claude-3-mock',
-            'summary': f"Conservative macro analysis shows {short_term.lower()} short-term sentiment. Risk management remains paramount in current environment.",
-            'market_sentiment': {
-                'short_term': short_term,
-                'medium_term': medium_term,
-                'confidence': confidence
-            },
-            'signals': signals,
-            'volatility': 'Moderate',
-            'macro_factors': {
-                'primary_risk': 'Global economic uncertainty affecting crypto adoption',
-                'opportunities': ['Institutional infrastructure development', 'Regulatory clarity improvements'],
-                'global_events': ['Central bank policy decisions', 'Regulatory developments']
-            },
-            'risk_assessment': {
-                'market_risk': 'Medium',
-                'liquidity_risk': 'Low',
-                'regulatory_risk': 'Medium'
-            }
-        }
-        
     def is_available(self) -> bool:
         """Check if Claude API is available."""
         return bool(self.api_key and self.api_key.strip())

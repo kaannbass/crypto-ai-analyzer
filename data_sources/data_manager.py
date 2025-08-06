@@ -36,39 +36,64 @@ class DataManager:
         self.preferred_source = 'binance'  # Primary data source
         
     async def get_market_data(self, symbols: List[str], force_refresh: bool = False) -> Dict:
-        """Get market data from live sources ONLY - no fallback data."""
+        """Get market data from live sources ONLY - NO FALLBACK DATA EVER."""
         try:
-            self.logger.info("🔄 Fetching LIVE data from real sources only...")
+            self.logger.info("🔄 Fetching LIVE data from multiple sources...")
             
-            # Try Binance first (fastest and most reliable)
+            # Try CoinGecko Simple API first (working and reliable)
+            self.logger.info("🔄 Trying CoinGecko Simple API...")
+            try:
+                from .coingecko_api import CoinGeckoAPI
+                async with CoinGeckoAPI() as coingecko:
+                    coingecko_data = await coingecko.get_market_data(symbols)
+                    
+                    if coingecko_data and len(coingecko_data) >= len(symbols) * 0.8:  # At least 80% success
+                        self.logger.info(f"✅ CoinGecko Simple API success: {len(coingecko_data)}/{len(symbols)} symbols")
+                        return coingecko_data
+            except Exception as e:
+                self.logger.warning(f"CoinGecko Simple API failed: {e}")
+            
+            # Try Binance if CoinGecko fails
             self.logger.info("🔄 Trying Binance API...")
-            binance_data = await self._get_binance_data(symbols, timeout=15)
+            try:
+                from .binance_api import BinanceAPI
+                async with BinanceAPI() as binance:
+                    binance_data = await binance.get_market_data(symbols)
+                    
+                    if binance_data and len(binance_data) >= len(symbols) * 0.8:  # At least 80% success
+                        self.logger.info(f"✅ Binance API success: {len(binance_data)}/{len(symbols)} symbols")
+                        return binance_data
+            except Exception as e:
+                self.logger.warning(f"Binance API failed: {e}")
             
-            if binance_data and len(binance_data) >= len(symbols) * 0.8:  # At least 80% success
-                self.logger.info(f"✅ Binance API success: {len(binance_data)}/{len(symbols)} symbols")
-                return binance_data
+            # Try alternative APIs (Bybit, KuCoin, etc.)
+            self.logger.info("🔄 Trying Alternative APIs...")
+            try:
+                from .alternative_apis import AlternativeAPIs
+                async with AlternativeAPIs() as alt_apis:
+                    alt_data = await alt_apis.get_all_alternative_data(symbols)
+                    
+                    if alt_data and len(alt_data) >= len(symbols) * 0.5:  # At least 50% success
+                        self.logger.info(f"✅ Alternative APIs success: {len(alt_data)}/{len(symbols)} symbols")
+                        return alt_data
+            except Exception as e:
+                self.logger.warning(f"Alternative APIs failed: {e}")
             
-            # Try CoinGecko if Binance fails or incomplete
-            self.logger.info("🔄 Fetching fresh data from CoinGecko Pro API")
-            coingecko_data = await self._get_coingecko_data(symbols, force_refresh=True)
+            # If all sources fail completely, return empty dict (NO FALLBACK)
+            self.logger.error("🚫 ALL LIVE DATA SOURCES FAILED - No data will be returned")
+            self.logger.error("📍 System will wait for next cycle - no fake data generated")
             
-            if coingecko_data and len(coingecko_data) >= len(symbols) * 0.5:  # At least 50% success
-                self.logger.info(f"✅ CoinGecko API success: {len(coingecko_data)}/{len(symbols)} symbols")
-                return coingecko_data
+            # Check if we have ANY cached data that's not too old (max 1 hour)
+            cached_data = await self._get_cached_data(symbols, max_age=3600)  # 1 hour max
+            if cached_data:
+                self.logger.info(f"📦 Using recent cached data: {len(cached_data)} symbols")
+                return cached_data
             
-            # If both sources fail completely, return empty dict (NO FALLBACK)
-            self.logger.error("🚫 ALL LIVE DATA SOURCES FAILED - No fallback data will be used")
-            self.logger.error("📍 Possible solutions:")
-            self.logger.error("   1. Check internet connection")
-            self.logger.error("   2. Use VPN if APIs are blocked in your region")
-            self.logger.error("   3. Verify API keys are correct")
-            self.logger.error("   4. Check if APIs are experiencing downtime")
-            
-            return {}  # Return empty instead of fallback data
+            return {}  # Return empty instead of any fake data
             
         except Exception as e:
-            self.logger.error(f"❌ Critical error in data fetching: {e}")
-            return {}  # Return empty instead of fallback data
+            self.logger.error(f"Error in get_market_data: {e}")
+            return {}  # Return empty instead of any fake data
             
     async def _fetch_from_sources(self, symbols: List[str]) -> Dict:
         """Fetch data from multiple sources with intelligent prioritization."""
@@ -286,112 +311,36 @@ class DataManager:
             'cache_duration_seconds': self.cache_duration
         } 
 
-    async def _create_fallback_data(self, symbols: List[str]) -> Dict:
-        """Create fallback data with reasonable default values when all sources fail."""
+    async def _get_cached_data(self, symbols: List[str], max_age: int) -> Optional[Dict]:
+        """
+        Attempt to retrieve cached data for a list of symbols.
+        Returns the most recent valid data if available, otherwise None.
+        """
         try:
-            self.logger.info("🔧 Creating fallback data with default values")
+            # Sort symbols for consistent cache key
+            sorted_symbols = sorted(symbols)
+            cache_key = f"market_data_{'-'.join(sorted_symbols)}"
             
-            # Try to get at least partial data from any available source
-            partial_data = {}
-            
-            # Quick attempt at Binance without full retry logic
-            try:
-                from data_sources.binance_api import BinanceAPI
-                async with BinanceAPI() as binance:
-                    # Quick ping test
-                    if await asyncio.wait_for(binance.test_connection(), timeout=5.0):
-                        # Try to get at least ticker data for major symbols
-                        major_symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT']
-                        for symbol in major_symbols:
-                            if symbol in symbols:
-                                try:
-                                    ticker = await asyncio.wait_for(binance.get_ticker_24h(symbol), timeout=3.0)
-                                    if ticker and 'lastPrice' in ticker:
-                                        partial_data[symbol] = {
-                                            'price': float(ticker['lastPrice']),
-                                            'volume': float(ticker.get('volume', 0)),
-                                            'volume_change_24h': 0.1,
-                                            'high_24h': float(ticker.get('highPrice', 0)),
-                                            'low_24h': float(ticker.get('lowPrice', 0)),
-                                            'change_24h': float(ticker.get('priceChangePercent', 0)) / 100,
-                                            'timestamp': datetime.utcnow().isoformat(),
-                                            'source': 'binance_partial'
-                                        }
-                                except Exception:
-                                    continue
-            except Exception:
-                pass
-            
-            # If we got some partial data, return it
-            if partial_data:
-                self.logger.info(f"✅ Retrieved partial data for {len(partial_data)} symbols")
-                return partial_data
-            
-            # Last resort: create minimal data structure for all symbols
-            fallback_data = {}
-            self.logger.info(f"Creating fallback data for all {len(symbols)} symbols")
-            
-            # Define reasonable default prices for major cryptocurrencies
-            default_prices = {
-                'BTCUSDT': 100000.0,
-                'ETHUSDT': 3000.0,
-                'BNBUSDT': 600.0,
-                'ADAUSDT': 0.5,
-                'SOLUSDT': 150.0,
-                'PEPEUSDT': 0.00002,
-                'XRPUSDT': 0.6,
-                'DOGEUSDT': 0.15,
-                'TRXUSDT': 0.25,
-                'LINKUSDT': 15.0,
-                'XLMUSDT': 0.12,
-                'XMRUSDT': 180.0,
-                'ZECUSDT': 60.0
-            }
-            
-            for symbol in symbols:  # Create data for ALL symbols
-                default_price = default_prices.get(symbol, 1.0)  # Default to $1 for unknown symbols
-                fallback_data[symbol] = {
-                    'price': default_price,
-                    'volume': 1000000.0,  # 1M volume
-                    'volume_change_24h': 0.1,  # 10% volume change
-                    'high_24h': default_price * 1.05,  # 5% higher
-                    'low_24h': default_price * 0.95,   # 5% lower
-                    'change_24h': 0.01,  # 1% change
-                    'timestamp': datetime.utcnow().isoformat(),
-                    'source': 'fallback'
-                }
-            
-            return fallback_data
-            
-        except Exception as e:
-            self.logger.error(f"Error creating fallback data: {e}")
-            return {}
-    
-    async def _try_extended_cache(self, cache_key: str, symbols: List[str]) -> Optional[Dict]:
-        """Try to use older cached data as fallback."""
-        try:
             if cache_key in self.cache:
                 cached_time = self.cache[cache_key]['timestamp']
                 age = (datetime.utcnow() - cached_time).total_seconds()
                 
-                # Allow up to 4 hours old data in emergency
-                if age < 14400:  # 4 hours
-                    self.logger.info(f"📦 Using extended cache (age: {age/3600:.1f} hours)")
-                    return self.cache[cache_key]['data']
-            
-            # Check CoinGecko extended cache
-            coingecko_cache_key = f"coingecko_data_{'-'.join(sorted(symbols))}"
-            if coingecko_cache_key in self.cache:
-                cached_time = self.cache[coingecko_cache_key]['timestamp']
-                age = (datetime.utcnow() - cached_time).total_seconds()
-                
-                # Allow up to 6 hours old CoinGecko data
-                if age < 21600:  # 6 hours
-                    self.logger.info(f"📦 Using extended CoinGecko cache (age: {age/3600:.1f} hours)")
-                    return self.cache[coingecko_cache_key]['data']
+                if age < max_age:
+                    cached_data = self.cache[cache_key]['data']
+                    # Verify cached data is not fallback/mock data
+                    real_data_count = sum(1 for data in cached_data.values() 
+                                        if data.get('source') not in ['fallback', 'mock', 'default'])
                     
+                    if real_data_count > 0:
+                        self.logger.info(f"📦 Using recent cached REAL data for {real_data_count}/{len(symbols)} symbols (age: {age/60:.1f} minutes)")
+                        return cached_data
+                    else:
+                        self.logger.warning("⚠️ Cached data contains only fallback/mock data - rejecting")
+                        return None
+                else:
+                    self.logger.warning(f"⚠️ Cached data for {len(symbols)} symbols is too old ({age/60:.1f} minutes)")
+                    return None
             return None
-            
         except Exception as e:
-            self.logger.error(f"Error trying extended cache: {e}")
+            self.logger.error(f"Error checking cached data: {e}")
             return None 

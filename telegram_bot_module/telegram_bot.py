@@ -6,6 +6,7 @@ Enhanced with interactive commands, portfolio tracking, and real-time features.
 import asyncio
 import json
 import logging
+import threading
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Union
 import config
@@ -220,77 +221,149 @@ Hoş geldiniz! Gelişmiş AI destekli kripto analiz botuna!
         await self._send_message(update, portfolio_message, keyboard)
 
     async def cmd_signals(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /signals command."""
-        args = context.args
-        if args and args[0].lower() in ['tr', 'türkçe', 'turkish']:
-            signals_message = await self.get_turkish_signals()
-        else:
-            signals_message = await self.get_latest_signals()
-        
-        keyboard_data = [
-            [("🔄 Yenile / Refresh", "refresh_signals")],
-            [("📊 Market Analizi", "market_analysis")],
-            [("🇹🇷 Türkçe Format", "turkish_signals")]
-        ]
-        keyboard = self._create_keyboard(keyboard_data)
-        await self._send_message(update, signals_message, keyboard)
+        """Handle /signals command - Show trading signals with REAL data and AI analysis."""
+        try:
+            await update.message.reply_text("🎯 <b>Sinyaller analiz ediliyor...</b>", parse_mode='HTML')
+            
+            # Get real market data
+            market_data = await self._get_real_market_data()
+            
+            if market_data:
+                # Generate AI signals
+                signals = await self._generate_ai_signals(market_data)
+                
+                if signals:
+                    message = "🎯 <b>AI TRADING SİNYALLERİ</b>\n\n"
+                    
+                    for i, signal in enumerate(signals[:5]):  # Show top 5 signals
+                        symbol = signal.get('symbol', 'Unknown')
+                        action = signal.get('action', 'WAIT')
+                        confidence = signal.get('confidence', 0)
+                        reason = signal.get('reason', 'No reason provided')
+                        
+                        emoji = "🟢" if action == "BUY" else "🔴" if action == "SELL" else "🟡"
+                        message += f"{i+1}. <b>{symbol}</b> {emoji}\n"
+                        message += f"   📊 {action} ({confidence:.1%})\n"
+                        message += f"   📝 {reason}\n\n"
+                    
+                    message += f"⏰ <i>Analiz zamanı: {datetime.now().strftime('%H:%M:%S')}</i>"
+                    
+                    keyboard = [
+                        [InlineKeyboardButton("🔄 Yenile", callback_data="refresh_signals")],
+                        [InlineKeyboardButton("📊 Detaylı Analiz", callback_data="detailed_signals")]
+                    ]
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    
+                    await update.message.reply_text(message, parse_mode='HTML', reply_markup=reply_markup)
+                else:
+                    await update.message.reply_text(
+                        "⚠️ <b>Şu anda sinyal yok</b>\n\nPiyasa nötr durumda.",
+                        parse_mode='HTML'
+                    )
+            else:
+                await update.message.reply_text(
+                    "❌ <b>Veri alınamadı</b>\n\nSinyal analizi yapılamıyor.",
+                    parse_mode='HTML'
+                )
+                
+        except Exception as e:
+            self.logger.error(f"Error in signals command: {e}")
+            await update.message.reply_text(
+                f"❌ <b>Hata:</b> {str(e)}",
+                parse_mode='HTML'
+            )
 
     async def cmd_market(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /market command."""
-        market_message = await self.get_market_overview()
-        keyboard_data = [
-            [("📈 Price Alerts", "price_alerts"), ("📰 News Impact", "news_impact")],
-            [("🧠 AI Analysis", "ai_analysis")]
-        ]
-        keyboard = self._create_keyboard(keyboard_data)
-        await self._send_message(update, market_message, keyboard)
-
-    async def cmd_analyze(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /analyze command with optional symbol parameter."""
+        """Handle /market command - Show current market overview with REAL data."""
         try:
-            args = context.args
+            await update.message.reply_text("📊 <b>Market durumu alınıyor...</b>", parse_mode='HTML')
             
-            # If specific symbol provided
-            if args and len(args) > 0:
-                symbol = args[0].upper()
-                await update.message.reply_text("🔍 <b>Analiz başlatılıyor...</b>", parse_mode='HTML')
+            # Get real market data from CoinGecko
+            market_data = await self._get_real_market_data()
+            
+            if market_data:
+                message = "📈 <b>GÜNCEL MARKET DURUMU</b>\n\n"
                 
-                # Get single crypto analysis
-                analysis = await self.get_single_crypto_analysis(symbol)
+                # Calculate statistics
+                total_symbols = len(market_data)
+                positive_changes = sum(1 for data in market_data.values() if data.get('change_24h', 0) > 0)
+                negative_changes = sum(1 for data in market_data.values() if data.get('change_24h', 0) < 0)
                 
-                # Create interactive keyboard
+                message += f"📊 <b>Market Özeti:</b>\n"
+                message += f"• Toplam: {total_symbols} coin\n"
+                message += f"• Yükselişte: {positive_changes} 🟢\n"
+                message += f"• Düşüşte: {negative_changes} 🔴\n"
+                message += f"• Nötr: {total_symbols - positive_changes - negative_changes} 🟡\n\n"
+                
+                # Show top coins
+                sorted_data = sorted(market_data.items(), key=lambda x: x[1].get('price', 0), reverse=True)
+                message += "🏆 <b>En Yüksek Fiyatlı Coinler:</b>\n"
+                for i, (symbol, data) in enumerate(sorted_data[:5]):
+                    price = data.get('price', 0)
+                    change = data.get('change_24h', 0) * 100
+                    emoji = "🟢" if change > 0 else "🔴" if change < 0 else "🟡"
+                    message += f"{i+1}. {symbol}: ${price:,.2f} ({change:+.2f}%) {emoji}\n"
+                
+                # Add AI analysis
+                ai_analysis = await self._get_ai_market_analysis(market_data)
+                if ai_analysis:
+                    message += f"\n🧠 <b>AI Analizi:</b>\n{ai_analysis}\n"
+                
+                message += f"\n⏰ <i>Son güncelleme: {datetime.now().strftime('%H:%M:%S')}</i>"
+                
                 keyboard = [
-                    [InlineKeyboardButton("🔄 Yenile", callback_data=f"refresh_crypto_{symbol}")],
-                    [InlineKeyboardButton("📊 Karşılaştır", callback_data=f"compare_crypto_{symbol}")],
-                    [InlineKeyboardButton("📈 Grafik", callback_data=f"chart_crypto_{symbol}")],
-                    [InlineKeyboardButton("⏰ Alarm Kur", callback_data=f"alert_crypto_{symbol}")]
+                    [InlineKeyboardButton("🔄 Yenile", callback_data="refresh_market")],
+                    [InlineKeyboardButton("📊 Detaylı Analiz", callback_data="detailed_analysis")]
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 
-                await update.message.reply_text(
-                    analysis,
-                    parse_mode='HTML',
-                    reply_markup=reply_markup
-                )
+                await update.message.reply_text(message, parse_mode='HTML', reply_markup=reply_markup)
             else:
-                # No symbol provided - show crypto selection menu
-                keyboard = await self.get_crypto_selection_keyboard()
-                
                 await update.message.reply_text(
-                    "🎯 <b>Hangi kripto için detaylı analiz istiyorsunuz?</b>\n\n"
-                    "💡 <b>Aşağıdaki butonlardan seçin:</b>\n"
-                    "• Tüm desteklenen kriptolar listelendi\n"
-                    "• Tıklayarak anında analiz alabilirsiniz\n"
-                    "• Veya manuel: <code>/analyze BTC</code>\n\n"
-                    "🚀 <i>AI destekli detaylı analiz için kripto seçin!</i>",
-                    parse_mode='HTML',
-                    reply_markup=keyboard
+                    "❌ <b>Market verisi alınamadı</b>\n\nLütfen daha sonra tekrar deneyin.",
+                    parse_mode='HTML'
+                )
+                
+        except Exception as e:
+            self.logger.error(f"Error in market command: {e}")
+            await update.message.reply_text(
+                f"❌ <b>Hata:</b> {str(e)}",
+                parse_mode='HTML'
+            )
+
+    async def cmd_analyze(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /analyze command - Perform comprehensive AI analysis."""
+        try:
+            await update.message.reply_text("🧠 <b>AI analizi başlatılıyor...</b>", parse_mode='HTML')
+            
+            # Get real market data
+            market_data = await self._get_real_market_data()
+            
+            if market_data:
+                # Perform comprehensive AI analysis
+                analysis = await self._perform_comprehensive_analysis(market_data)
+                
+                message = "🧠 <b>AI MARKET ANALİZİ</b>\n\n"
+                message += analysis
+                message += f"\n⏰ <i>Analiz zamanı: {datetime.now().strftime('%H:%M:%S')}</i>"
+                
+                keyboard = [
+                    [InlineKeyboardButton("🔄 Yenile", callback_data="refresh_analysis")],
+                    [InlineKeyboardButton("📊 Detaylı Rapor", callback_data="detailed_report")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                await update.message.reply_text(message, parse_mode='HTML', reply_markup=reply_markup)
+            else:
+                await update.message.reply_text(
+                    "❌ <b>Veri alınamadı</b>\n\nAI analizi yapılamıyor.",
+                    parse_mode='HTML'
                 )
                 
         except Exception as e:
             self.logger.error(f"Error in analyze command: {e}")
             await update.message.reply_text(
-                f"❌ <b>Analiz hatası:</b> {str(e)}",
+                f"❌ <b>Hata:</b> {str(e)}",
                 parse_mode='HTML'
             )
 
@@ -1103,30 +1176,32 @@ Hoş geldiniz! Gelişmiş AI destekli kripto analiz botuna!
             self.logger.warning(f"Attempted to remove non-existent {symbol} from portfolio for chat {chat_id}")
 
     async def get_latest_signals(self) -> str:
-        """Get the latest trading signals."""
-        signals_message = "🎯 <b>Latest Trading Signals</b>\n\n"
-        # In a real application, you'd fetch these from your analysis module
-        # For now, we'll simulate some dummy data
-        dummy_signals = [
-            {'symbol': 'BTCUSDT', 'action': 'BUY', 'confidence': 0.85, 'reasoning': 'Strong bullish momentum'},
-            {'symbol': 'ETHUSDT', 'action': 'SELL', 'confidence': 0.6, 'reasoning': 'Bearish divergence'},
-            {'symbol': 'XRPUSDT', 'action': 'WAIT', 'confidence': 0.4, 'reasoning': 'Waiting for confirmation'}
-        ]
-        for signal in dummy_signals:
-            signals_message += f"• {signal['symbol']}: {signal['action']} ({signal['confidence']:.2f})\n"
-        return signals_message
+        """Get the latest trading signals from REAL data."""
+        try:
+            # Import main application to get real signals
+            from main import analyzer
+            if hasattr(analyzer, 'get_latest_signals'):
+                return await analyzer.get_latest_signals()
+            
+            # If no real signals available, return message
+            return "🎯 <b>Latest Trading Signals</b>\n\n❌ No real signals available at the moment.\n\nPlease ensure:\n• Real data sources are working\n• Analysis is running properly\n• VPN is active if needed"
+            
+        except Exception as e:
+            return f"🎯 <b>Latest Trading Signals</b>\n\n❌ Error fetching real signals: {str(e)}"
 
     async def get_market_overview(self) -> str:
-        """Get a current market overview."""
-        market_message = "📈 <b>Current Market Overview</b>\n\n"
-        # In a real application, you'd fetch this from your data source
-        # For now, we'll simulate some dummy data
-        market_message += "• BTCUSDT: $30,000 (↑ 2.5%) | ETHUSDT: $2,000 (↑ 1.8%)\n"
-        market_message += "• XRPUSDT: $0.50 (↓ 0.5%) | SOLUSDT: $50 (↑ 10%)\n"
-        market_message += "• Total Market Cap: $1.5T | 24h Volume: $50B\n"
-        market_message += "• Top Gainers: BTCUSDT, SOLUSDT, ETHUSDT\n"
-        market_message += "• Top Losers: XRPUSDT, BNBUSDT, ADAUSDT\n"
-        return market_message
+        """Get a current market overview from REAL data."""
+        try:
+            # Import main application to get real market data
+            from main import analyzer
+            if hasattr(analyzer, 'get_market_overview'):
+                return await analyzer.get_market_overview()
+            
+            # If no real data available, return message
+            return "📈 <b>Current Market Overview</b>\n\n❌ No real market data available at the moment.\n\nPlease ensure:\n• Real data sources are working\n• Internet connection is stable\n• VPN is active if needed"
+            
+        except Exception as e:
+            return f"📈 <b>Current Market Overview</b>\n\n❌ Error fetching real market data: {str(e)}"
 
     async def get_settings_menu(self, sub_command: str) -> str:
         """Get the settings menu based on sub-command."""
@@ -1192,19 +1267,18 @@ Hoş geldiniz! Gelişmiş AI destekli kripto analiz botuna!
         return "🧠 AI Analysis not implemented for this type."
 
     async def perform_symbol_analysis(self, symbol: str) -> str:
-        """Perform a detailed analysis for a specific symbol."""
-        # In a real application, you'd call your analysis module
-        # For now, simulate a dummy analysis
-        return f"🧠 <b>Analysis for {symbol}</b>\n\n" + \
-               "• Current Price: $" + str(round(config.DUMMY_PRICES.get(symbol, 0), 2)) + "\n" + \
-               "• 24h Price Change: " + str(round(config.DUMMY_PRICE_CHANGES.get(symbol, 0), 2)) + "%\n" + \
-               "• 24h Volume: " + str(round(config.DUMMY_VOLUMES.get(symbol, 0), 2)) + "\n" + \
-               "• 24h Volume Ratio: " + str(round(config.DUMMY_VOLUME_RATIOS.get(symbol, 1), 2)) + "x\n" + \
-               "• RSI: " + str(round(config.DUMMY_RSI.get(symbol, 50), 1)) + "\n" + \
-               "• MACD: " + str(round(config.DUMMY_MACD.get(symbol, 0), 2)) + "\n" + \
-               "• Bollinger Bands: " + str(round(config.DUMMY_BB.get(symbol, 0), 2)) + "\n" + \
-               "• Sentiment: " + config.DUMMY_SENTIMENT.get(symbol, 'Neutral') + "\n\n" + \
-               "💡 <i>This is a simulated analysis.</i>"
+        """Perform a detailed analysis for a specific symbol using REAL data."""
+        try:
+            # Import main application to get real analysis
+            from main import analyzer
+            if hasattr(analyzer, 'perform_symbol_analysis'):
+                return await analyzer.perform_symbol_analysis(symbol)
+            
+            # If no real analysis available, return message
+            return f"🧠 <b>Analysis for {symbol}</b>\n\n❌ No real analysis available at the moment.\n\nPlease ensure:\n• Real data sources are working\n• AI analysis is running properly\n• VPN is active if needed"
+            
+        except Exception as e:
+            return f"🧠 <b>Analysis for {symbol}</b>\n\n❌ Error fetching real analysis: {str(e)}"
 
     async def perform_portfolio_analysis(self, chat_id: int) -> str:
         """Perform a portfolio-specific analysis."""
@@ -1227,18 +1301,18 @@ Hoş geldiniz! Gelişmiş AI destekli kripto analiz botuna!
                "💡 <i>This is a simulated portfolio analysis.</i>"
 
     async def get_performance_stats(self) -> str:
-        """Get performance statistics."""
-        # In a real application, you'd fetch these from your data source
-        # For now, simulate some dummy stats
-        return "📈 <b>Performance Statistics</b>\n\n" + \
-               "• Total Signals Generated: 100\n" + \
-               "• Buy Signals: 30\n" + \
-               "• Sell Signals: 20\n" + \
-               "• Wait Signals: 50\n" + \
-               "• Average Confidence: 0.75\n" + \
-               "• Signal Accuracy: 95%\n" + \
-               "• P&L History: $10,000 (Last 7 days)\n\n" + \
-               "💡 <i>These are simulated statistics.</i>"
+        """Get performance statistics from REAL data."""
+        try:
+            # Import main application to get real stats
+            from main import analyzer
+            if hasattr(analyzer, 'get_performance_stats'):
+                return await analyzer.get_performance_stats()
+            
+            # If no real stats available, return message
+            return "📈 <b>Performance Statistics</b>\n\n❌ No real performance data available at the moment.\n\nPlease ensure:\n• Real data sources are working\n• Analysis is running properly\n• VPN is active if needed"
+            
+        except Exception as e:
+            return f"📈 <b>Performance Statistics</b>\n\n❌ Error fetching real stats: {str(e)}"
 
     async def cmd_refresh(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /refresh command - Force refresh market data."""
@@ -1765,9 +1839,10 @@ Hoş geldiniz! Gelişmiş AI destekli kripto analiz botuna!
         return decorator
 
     def start(self):
-        """Start Telegram polling in a background thread."""
+        """Start Telegram polling with enhanced conflict prevention."""
         if not self.enabled or not self.application:
             return
+            
         def _run():
             try:
                 # Create new event loop for this thread
@@ -1775,20 +1850,201 @@ Hoş geldiniz! Gelişmiş AI destekli kripto analiz botuna!
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 
+                # Clear any existing webhooks and pending updates
+                async def clear_conflicts():
+                    try:
+                        # Delete any existing webhook
+                        await self.application.bot.delete_webhook(drop_pending_updates=True)
+                        self.logger.info("✅ Cleared existing webhook and pending updates")
+                        await asyncio.sleep(2)  # Wait a bit
+                    except Exception as e:
+                        self.logger.warning(f"Webhook clear warning: {e}")
+                
                 # Setup command menu in the new loop
                 loop.run_until_complete(self.setup_command_menu())
+                loop.run_until_complete(clear_conflicts())
                 
-                # Start polling
-                self.application.run_polling(stop_signals=None)
+                # Start polling with conflict prevention
+                self.logger.info("🤖 Starting Telegram bot polling...")
+                self.application.run_polling(
+                    drop_pending_updates=True,  # Drop any pending updates
+                    close_loop=False,
+                    stop_signals=None,
+                    allowed_updates=['message', 'callback_query']  # Only handle specific updates
+                )
+                
             except Exception as e:
-                self.logger.error(f"Telegram polling failed: {e}")
-        import threading
-        threading.Thread(target=_run, daemon=True).start()
+                if "Conflict" in str(e):
+                    self.logger.error("❌ Telegram bot conflict detected - another instance may be running")
+                    self.logger.error("📍 Please ensure only one bot instance is active")
+                else:
+                    self.logger.error(f"Telegram bot error: {e}")
+        
+        # Start in separate thread with daemon mode
+        self.thread = threading.Thread(target=_run, daemon=True)
+        self.thread.start()
+        self.logger.info("🤖 Telegram bot thread started")
 
-    async def send_news(self, news_data: List[Dict]) -> bool:
-        """Compatibility wrapper for older code paths expecting send_news().
-        Delegates to send_news_update for backward compatibility."""
-        return await self.send_news_update(news_data)
+    async def _get_real_market_data(self) -> Dict:
+        """Get real market data from CoinGecko Simple API."""
+        try:
+            import aiohttp
+            from datetime import datetime
+            
+            # CoinGecko symbol mapping
+            symbol_mapping = {
+                'BTCUSDT': 'bitcoin',
+                'ETHUSDT': 'ethereum', 
+                'BNBUSDT': 'binancecoin',
+                'ADAUSDT': 'cardano',
+                'SOLUSDT': 'solana',
+                'PEPEUSDT': 'pepe',
+                'XRPUSDT': 'ripple',
+                'DOGEUSDT': 'dogecoin',
+                'TRXUSDT': 'tron',
+                'LINKUSDT': 'chainlink',
+                'XLMUSDT': 'stellar',
+                'XMRUSDT': 'monero',
+                'ZECUSDT': 'zcash'
+            }
+            
+            # Get symbols from config
+            symbols = list(symbol_mapping.keys())
+            coin_ids = [symbol_mapping[symbol] for symbol in symbols]
+            ids_param = ','.join(coin_ids)
+            
+            # Call CoinGecko Simple API
+            url = f"https://api.coingecko.com/api/v3/simple/price?ids={ids_param}&vs_currencies=usd"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=15) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        
+                        # Convert to our format
+                        market_data = {}
+                        for symbol in symbols:
+                            coin_id = symbol_mapping[symbol]
+                            if coin_id in data:
+                                coin_data = data[coin_id]
+                                usd_price = coin_data.get('usd', 0)
+                                
+                                market_data[symbol] = {
+                                    'price': usd_price,
+                                    'change_24h': 0.0,  # Simple API doesn't provide this
+                                    'volume': 0,
+                                    'high_24h': usd_price,
+                                    'low_24h': usd_price,
+                                    'volume_change_24h': 0.0,
+                                    'timestamp': datetime.utcnow().isoformat(),
+                                    'source': 'coingecko_simple'
+                                }
+                        
+                        self.logger.info(f"✅ Retrieved {len(market_data)} symbols from CoinGecko")
+                        return market_data
+                    else:
+                        self.logger.error(f"CoinGecko API error: {response.status}")
+                        return {}
+                        
+        except Exception as e:
+            self.logger.error(f"Error getting real market data: {e}")
+            return {}
+
+    async def _generate_ai_signals(self, market_data: Dict) -> List[Dict]:
+        """Generate AI trading signals from market data."""
+        try:
+            # Import AI aggregator
+            from llm.aggregator import AIAggregator
+            
+            aggregator = AIAggregator()
+            analysis = await aggregator.analyze_market_data(market_data, "Analyze market data and generate trading signals.")
+            
+            if analysis and 'signals' in analysis:
+                return analysis['signals']
+            else:
+                # Generate basic signals based on price data
+                signals = []
+                for symbol, data in market_data.items():
+                    price = data.get('price', 0)
+                    
+                    # Simple signal logic (can be enhanced)
+                    if price > 0:
+                        signal = {
+                            'symbol': symbol,
+                            'action': 'WAIT',  # Default to wait
+                            'confidence': 0.5,
+                            'reason': f'Current price: ${price:,.2f} - Monitoring for opportunities'
+                        }
+                        signals.append(signal)
+                
+                return signals
+                
+        except Exception as e:
+            self.logger.error(f"Error generating AI signals: {e}")
+            return []
+
+    async def _get_ai_market_analysis(self, market_data: Dict) -> str:
+        """Get AI market analysis summary."""
+        try:
+            # Import AI aggregator
+            from llm.aggregator import AIAggregator
+            
+            aggregator = AIAggregator()
+            analysis = await aggregator.analyze_market_data(market_data, "Provide a brief market analysis summary.")
+            
+            if analysis and 'summary' in analysis:
+                return analysis['summary']
+            else:
+                # Basic analysis
+                total_symbols = len(market_data)
+                total_value = sum(data.get('price', 0) for data in market_data.values())
+                return f"Market analysis: {total_symbols} coins tracked, total market value: ${total_value:,.0f}"
+                
+        except Exception as e:
+            self.logger.error(f"Error getting AI analysis: {e}")
+            return "AI analysis temporarily unavailable"
+
+    async def _perform_comprehensive_analysis(self, market_data: Dict) -> str:
+        """Perform comprehensive AI analysis."""
+        try:
+            # Import AI aggregator
+            from llm.aggregator import AIAggregator
+            
+            aggregator = AIAggregator()
+            analysis = await aggregator.analyze_market_data(
+                market_data, 
+                "Perform comprehensive market analysis including trends, opportunities, and risks."
+            )
+            
+            if analysis:
+                message = ""
+                
+                if 'summary' in analysis:
+                    message += f"📊 <b>Market Özeti:</b>\n{analysis['summary']}\n\n"
+                
+                if 'signals' in analysis and analysis['signals']:
+                    message += "🎯 <b>Öne Çıkan Sinyaller:</b>\n"
+                    for signal in analysis['signals'][:3]:
+                        symbol = signal.get('symbol', 'Unknown')
+                        action = signal.get('action', 'WAIT')
+                        confidence = signal.get('confidence', 0)
+                        message += f"• {symbol}: {action} ({confidence:.1%})\n"
+                    message += "\n"
+                
+                if 'market_sentiment' in analysis:
+                    sentiment = analysis['market_sentiment']
+                    message += f"🧠 <b>Piyasa Sentiment:</b>\n"
+                    message += f"• Kısa vadeli: {sentiment.get('short_term', 'N/A')}\n"
+                    message += f"• Orta vadeli: {sentiment.get('medium_term', 'N/A')}\n"
+                    message += f"• Güven: {sentiment.get('confidence', 'N/A')}\n\n"
+                
+                return message
+            else:
+                return "AI analizi şu anda mevcut değil"
+                
+        except Exception as e:
+            self.logger.error(f"Error in comprehensive analysis: {e}")
+            return f"Analiz hatası: {str(e)}"
 
 
 # Global instance - Keep both for compatibility

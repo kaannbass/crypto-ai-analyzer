@@ -26,35 +26,64 @@ class CryptoNewsAPI:
             await self.session.close()
     
     async def get_crypto_news(self, limit: int = 20) -> List[Dict]:
-        """Get latest crypto news from multiple sources."""
-        all_news = []
-        
-        # Try multiple sources
-        sources = [
-            self.get_coindesk_news,
-            self.get_cryptonews_free,
-            self.get_coingecko_news,
-            self.get_reddit_crypto_news
-        ]
-        
-        for source_func in sources:
+        """Get crypto news from multiple sources - REAL DATA ONLY."""
+        try:
+            self.logger.info(f"🔄 Fetching REAL crypto news from live sources only...")
+            all_news = []
+            
+            # Try CryptoNews.net first (if available)
             try:
-                news_data = await source_func(limit=min(limit, 10))
-                if news_data:
-                    all_news.extend(news_data)
-                    self.logger.info(f"Fetched {len(news_data)} articles from {source_func.__name__}")
-                    
-                    # If we have enough news, break
-                    if len(all_news) >= limit:
-                        break
-                        
+                cryptonews_data = await self._get_cryptonews_net(limit)
+                if cryptonews_data:
+                    all_news.extend(cryptonews_data)
+                    self.logger.info(f"✅ Got {len(cryptonews_data)} articles from CryptoNews.net")
             except Exception as e:
-                self.logger.warning(f"Failed to fetch from {source_func.__name__}: {e}")
-                continue
-        
-        # Sort by timestamp and limit
-        all_news.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
-        return all_news[:limit]
+                self.logger.warning(f"CryptoNews.net failed: {e}")
+            
+            # Try RSS feeds
+            try:
+                rss_data = await self._get_rss_news(limit)
+                if rss_data:
+                    all_news.extend(rss_data)
+                    self.logger.info(f"✅ Got {len(rss_data)} articles from RSS feeds")
+            except Exception as e:
+                self.logger.warning(f"RSS feeds failed: {e}")
+            
+            # If no real news data available, return empty list
+            if not all_news:
+                self.logger.error("🚫 NO REAL NEWS DATA AVAILABLE - returning empty list")
+                return []
+            
+            # Remove duplicates and sort by date
+            seen_titles = set()
+            unique_news = []
+            for article in all_news:
+                title = article.get('title', '').lower()
+                if title not in seen_titles:
+                    seen_titles.add(title)
+                    unique_news.append(article)
+            
+            # Sort by date (newest first)
+            unique_news.sort(key=lambda x: x.get('published_at', ''), reverse=True)
+            
+            self.logger.info(f"✅ Returning {len(unique_news[:limit])} real news articles")
+            return unique_news[:limit]
+            
+        except Exception as e:
+            self.logger.error(f"Error fetching crypto news: {e}")
+            return []  # Return empty list instead of mock data
+
+    async def _get_cryptonews_net(self, limit: int) -> List[Dict]:
+        """Get news from CryptoNews.net - REAL API ONLY."""
+        try:
+            # This would need actual CryptoNews.net API implementation
+            # For now, return empty list since no real API is implemented
+            self.logger.warning("CryptoNews.net API not implemented - no mock data returned")
+            return []
+            
+        except Exception as e:
+            self.logger.error(f"Error fetching from CryptoNews.net: {e}")
+            return []
     
     async def get_coindesk_news(self, limit: int = 10) -> List[Dict]:
         """Fetch news from CoinDesk (free RSS feed)."""
@@ -72,48 +101,15 @@ class CryptoNewsAPI:
         return []
     
     async def get_cryptonews_free(self, limit: int = 10) -> List[Dict]:
-        """Fetch news from CryptoNews.net (free)."""
+        """Fetch news from CryptoNews.net (free) - REAL DATA ONLY."""
         try:
-            # Mock implementation - replace with actual CryptoNews.net scraping or API
-            mock_news = [
-                {
-                    'title': 'Bitcoin Reaches New All-Time High Amid Institutional Adoption',
-                    'summary': 'Major financial institutions continue to add Bitcoin to their portfolios...',
-                    'url': 'https://example.com/news/1',
-                    'source': 'CryptoNews',
-                    'timestamp': datetime.utcnow().isoformat(),
-                    'sentiment': 'bullish',
-                    'impact': 'high',
-                    'keywords': ['bitcoin', 'institutions', 'adoption']
-                },
-                {
-                    'title': 'Ethereum Layer 2 Solutions See Record Volume',
-                    'summary': 'Layer 2 scaling solutions for Ethereum process record transaction volumes...',
-                    'url': 'https://example.com/news/2',
-                    'source': 'CryptoNews',
-                    'timestamp': (datetime.utcnow() - timedelta(hours=1)).isoformat(),
-                    'sentiment': 'bullish',
-                    'impact': 'medium',
-                    'keywords': ['ethereum', 'layer2', 'scaling']
-                },
-                {
-                    'title': 'Regulatory Uncertainty Clouds Altcoin Market',
-                    'summary': 'New regulations being considered may impact smaller cryptocurrencies...',
-                    'url': 'https://example.com/news/3',
-                    'source': 'CryptoNews',
-                    'timestamp': (datetime.utcnow() - timedelta(hours=2)).isoformat(),
-                    'sentiment': 'bearish',
-                    'impact': 'medium',
-                    'keywords': ['regulation', 'altcoins', 'sec']
-                }
-            ]
-            
-            return mock_news[:limit]
+            # No real API implementation available - return empty list
+            self.logger.warning("CryptoNews free API not implemented - no mock data returned")
+            return []
             
         except Exception as e:
             self.logger.error(f"CryptoNews fetch failed: {e}")
-            
-        return []
+            return []
     
     async def get_coingecko_news(self, limit: int = 10) -> List[Dict]:
         """Fetch news from CoinGecko API (free tier)."""
@@ -184,41 +180,17 @@ class CryptoNewsAPI:
         return []
     
     def parse_rss_feed(self, xml_content: str, source: str, limit: int = 10) -> List[Dict]:
-        """Parse RSS feed XML content."""
-        # This is a simplified RSS parser - in production, use feedparser library
+        """Parse RSS feed XML content - REAL DATA ONLY."""
         news_list = []
         
         try:
-            # Mock RSS parsing - replace with actual XML parsing
-            mock_rss_news = [
-                {
-                    'title': 'Fed Rate Decision Impacts Crypto Markets',
-                    'summary': 'Federal Reserve decision causes volatility in cryptocurrency markets...',
-                    'url': 'https://coindesk.com/news/1',
-                    'source': source,
-                    'timestamp': datetime.utcnow().isoformat(),
-                    'sentiment': 'neutral',
-                    'impact': 'high',
-                    'keywords': ['fed', 'rates', 'markets']
-                },
-                {
-                    'title': 'DeFi Protocol Launches New Yield Farming Features',
-                    'summary': 'New DeFi protocol offers innovative yield farming opportunities...',
-                    'url': 'https://coindesk.com/news/2',
-                    'source': source,
-                    'timestamp': (datetime.utcnow() - timedelta(minutes=30)).isoformat(),
-                    'sentiment': 'bullish',
-                    'impact': 'medium',
-                    'keywords': ['defi', 'yield', 'farming']
-                }
-            ]
-            
-            return mock_rss_news[:limit]
+            # No real RSS parsing implementation - return empty list
+            self.logger.warning("RSS parsing not implemented - no mock data returned")
+            return []
             
         except Exception as e:
             self.logger.error(f"RSS parsing failed: {e}")
-            
-        return news_list
+            return []
     
     def analyze_basic_sentiment(self, text: str) -> str:
         """Basic sentiment analysis based on keywords."""

@@ -40,7 +40,7 @@ class OpenAIClient:
         try:
             if not self.is_available() or not self.client:
                 self.logger.warning("OpenAI API not available")
-                return self.generate_mock_analysis(market_data)
+                return None
                 
             # Prepare market data for analysis
             market_summary = self.prepare_market_data(market_data)
@@ -94,21 +94,20 @@ Return ONLY a valid JSON response in this exact format:
                     return analysis
                 except json.JSONDecodeError as e:
                     self.logger.error(f"Failed to parse OpenAI response: {e}")
-                    return self.generate_mock_analysis(market_data)
+                    return None
             
             return None
             
         except Exception as e:
             self.logger.error(f"OpenAI analysis failed: {e}")
-            return self.generate_mock_analysis(market_data)
+            return None  # Return None instead of mock data
             
     async def analyze_macro_sentiment(self, enhanced_context: Dict, prompt_template: str) -> Optional[Dict]:
         """Analyze market data with macro sentiment and global events using OpenAI API."""
         try:
             if not self.is_available() or not self.client:
                 self.logger.warning("OpenAI API key not available for macro analysis")
-                market_data = enhanced_context.get('market_data', {})
-                return self.generate_mock_macro_analysis(market_data, enhanced_context)
+                return None # Return None instead of mock data
                 
             # Prepare enhanced context
             context_data = json.dumps(enhanced_context, indent=2)
@@ -172,15 +171,13 @@ Return ONLY a valid JSON response in this exact format:
                     return analysis
                 except json.JSONDecodeError as e:
                     self.logger.error(f"Failed to parse OpenAI macro response: {e}")
-                    market_data = enhanced_context.get('market_data', {})
-                    return self.generate_mock_macro_analysis(market_data, enhanced_context)
+                    return None # Return None instead of mock data
             
             return None
             
         except Exception as e:
             self.logger.error(f"OpenAI macro sentiment analysis failed: {e}")
-            market_data = enhanced_context.get('market_data', {})
-            return self.generate_mock_macro_analysis(market_data, enhanced_context)
+            return None # Return None instead of mock data
 
     async def evaluate_news_sentiment(self, news_data: List[Dict]) -> Optional[Dict]:
         """Evaluate news sentiment impact on crypto markets."""
@@ -428,202 +425,6 @@ Return ONLY a valid JSON response:
             summary += f"\n{i}. {title} (Source: {source})"
             
         return summary
-
-    def generate_mock_analysis(self, market_data: Dict) -> Dict:
-        """Generate mock analysis for market data."""
-        signals = []
-        abnormal_coins = []
-        
-        for symbol, data in market_data.items():
-            price_change = data.get('change_24h', 0)
-            volume_change = data.get('volume_change_24h', 0)
-            current_price = data.get('price', 0)
-            
-            # Generate signals based on price change and volume
-            if price_change > 0.05 and volume_change > 0.2:  # Strong bullish with volume
-                action = 'BUY'
-                confidence = 0.75
-                reason = f"Strong bullish momentum (+{price_change*100:.1f}%) with volume confirmation"
-            elif price_change < -0.05 and volume_change > 0.2:  # Strong bearish with volume
-                action = 'SELL'
-                confidence = 0.7
-                reason = f"Strong bearish momentum ({price_change*100:.1f}%) with volume spike"
-            elif abs(price_change) > 0.08:  # Extreme moves
-                action = 'WAIT'
-                confidence = 0.4
-                reason = f"Extreme price movement ({price_change*100:.1f}%) - wait for confirmation"
-                
-                # Add to abnormal coins
-                abnormal_coins.append({
-                    'symbol': symbol,
-                    'movement': 'pump' if price_change > 0 else 'dump',
-                    'magnitude': f"{price_change*100:+.1f}%",
-                    'reason': 'Unusual price volatility detected'
-                })
-            else:
-                action = 'WAIT'
-                confidence = 0.3
-                reason = "No clear directional signal in current market conditions"
-            
-            # Calculate stop loss and take profit
-            if action == 'BUY':
-                stop_loss = current_price * 0.97  # 3% stop loss
-                take_profit = current_price * 1.04  # 4% take profit
-            elif action == 'SELL':
-                stop_loss = current_price * 1.03  # 3% stop loss for short
-                take_profit = current_price * 0.96  # 4% take profit for short
-            else:
-                stop_loss = current_price
-                take_profit = current_price
-            
-            signals.append({
-                'symbol': symbol,
-                'action': action,
-                'confidence': confidence,
-                'reason': reason,
-                'confidence_level': 'High' if confidence > 0.6 else 'Medium' if confidence > 0.4 else 'Low',
-                'entry_price': current_price,
-                'stop_loss': stop_loss,
-                'take_profit': take_profit
-            })
-        
-        # Determine overall sentiment
-        positive_changes = sum(1 for symbol, data in market_data.items() if data.get('change_24h', 0) > 0)
-        total_coins = len(market_data)
-        
-        if positive_changes / total_coins > 0.7:
-            short_term = 'Bullish'
-            medium_term = 'Bullish'
-            volatility = 'Moderate'
-        elif positive_changes / total_coins < 0.3:
-            short_term = 'Bearish'
-            medium_term = 'Bearish'
-            volatility = 'High'
-        else:
-            short_term = 'Neutral'
-            medium_term = 'Neutral'
-            volatility = 'Moderate'
-        
-        return {
-            'model': 'gpt-4-mock',
-            'summary': f"Market showing {short_term.lower()} sentiment with {positive_changes}/{total_coins} coins positive. Macro environment remains uncertain with mixed signals from traditional markets.",
-            'market_sentiment': {
-                'short_term': short_term,
-                'medium_term': medium_term,
-                'confidence': 'Medium'
-            },
-            'signals': signals,
-            'volatility': volatility,
-            'abnormal_coins': abnormal_coins[:3],  # Top 3 abnormal movements
-            'macro_factors': {
-                'primary_risk': 'Federal Reserve policy uncertainty affecting risk assets',
-                'opportunities': ['DeFi sector rotation', 'Institutional adoption momentum'],
-                'global_events': ['US inflation data', 'China regulatory updates']
-            },
-            'risk_assessment': {
-                'market_risk': 'Medium',
-                'liquidity_risk': 'Low',
-                'regulatory_risk': 'Medium'
-            }
-        }
-
-    def generate_mock_macro_analysis(self, market_data: Dict, context: Dict) -> Dict:
-        """Generate mock macro sentiment analysis for testing."""
-        signals = []
-        abnormal_coins = []
-        
-        for symbol, data in market_data.items():
-            price_change = data.get('change_24h', 0)
-            volume_change = data.get('volume_change_24h', 0)
-            current_price = data.get('price', 0)
-            
-            # Generate signals based on price change and volume
-            if price_change > 0.05 and volume_change > 0.2:  # Strong bullish with volume
-                action = 'BUY'
-                confidence = 0.75
-                reason = f"Strong bullish momentum (+{price_change*100:.1f}%) with volume confirmation"
-            elif price_change < -0.05 and volume_change > 0.2:  # Strong bearish with volume
-                action = 'SELL'
-                confidence = 0.7
-                reason = f"Strong bearish momentum ({price_change*100:.1f}%) with volume spike"
-            elif abs(price_change) > 0.08:  # Extreme moves
-                action = 'WAIT'
-                confidence = 0.4
-                reason = f"Extreme price movement ({price_change*100:.1f}%) - wait for confirmation"
-                
-                # Add to abnormal coins
-                abnormal_coins.append({
-                    'symbol': symbol,
-                    'movement': 'pump' if price_change > 0 else 'dump',
-                    'magnitude': f"{price_change*100:+.1f}%",
-                    'reason': 'Unusual price volatility detected'
-                })
-            else:
-                action = 'WAIT'
-                confidence = 0.3
-                reason = "No clear directional signal in current market conditions"
-            
-            # Calculate stop loss and take profit
-            if action == 'BUY':
-                stop_loss = current_price * 0.97  # 3% stop loss
-                take_profit = current_price * 1.04  # 4% take profit
-            elif action == 'SELL':
-                stop_loss = current_price * 1.03  # 3% stop loss for short
-                take_profit = current_price * 0.96  # 4% take profit for short
-            else:
-                stop_loss = current_price
-                take_profit = current_price
-            
-            signals.append({
-                'symbol': symbol,
-                'action': action,
-                'confidence': confidence,
-                'reason': reason,
-                'confidence_level': 'High' if confidence > 0.6 else 'Medium' if confidence > 0.4 else 'Low',
-                'entry_price': current_price,
-                'stop_loss': stop_loss,
-                'take_profit': take_profit
-            })
-        
-        # Determine overall sentiment
-        positive_changes = sum(1 for symbol, data in market_data.items() if data.get('change_24h', 0) > 0)
-        total_coins = len(market_data)
-        
-        if positive_changes / total_coins > 0.7:
-            short_term = 'Bullish'
-            medium_term = 'Bullish'
-            volatility = 'Moderate'
-        elif positive_changes / total_coins < 0.3:
-            short_term = 'Bearish'
-            medium_term = 'Bearish'
-            volatility = 'High'
-        else:
-            short_term = 'Neutral'
-            medium_term = 'Neutral'
-            volatility = 'Moderate'
-        
-        return {
-            'model': 'gpt-4-mock',
-            'summary': f"Market showing {short_term.lower()} sentiment with {positive_changes}/{total_coins} coins positive. Macro environment remains uncertain with mixed signals from traditional markets.",
-            'market_sentiment': {
-                'short_term': short_term,
-                'medium_term': medium_term,
-                'confidence': 'Medium'
-            },
-            'signals': signals,
-            'volatility': volatility,
-            'abnormal_coins': abnormal_coins[:3],  # Top 3 abnormal movements
-            'macro_factors': {
-                'primary_risk': 'Federal Reserve policy uncertainty affecting risk assets',
-                'opportunities': ['DeFi sector rotation', 'Institutional adoption momentum'],
-                'global_events': ['US inflation data', 'China regulatory updates']
-            },
-            'risk_assessment': {
-                'market_risk': 'Medium',
-                'liquidity_risk': 'Low',
-                'regulatory_risk': 'Medium'
-            }
-        }
             
     def is_available(self) -> bool:
         """Check if OpenAI API is available."""

@@ -165,98 +165,82 @@ class CoinGeckoAPI:
             self.logger.error(f"Error fetching CoinGecko prices: {e}")
             return {}
             
-    async def get_market_data(self, symbols: List[str]) -> Dict:
-        """Get comprehensive market data."""
+    async def get_market_data(self, symbols: List[str] = None) -> Dict:
+        """Get market data from CoinGecko Simple Price API."""
         try:
+            if not symbols:
+                symbols = ['bitcoin', 'ethereum', 'binancecoin', 'cardano', 'solana', 'pepe', 'ripple', 'dogecoin', 'tron', 'chainlink', 'stellar', 'monero', 'zcash']
+            
+            # Convert USDT symbols to CoinGecko IDs
+            symbol_mapping = {
+                'BTCUSDT': 'bitcoin',
+                'ETHUSDT': 'ethereum', 
+                'BNBUSDT': 'binancecoin',
+                'ADAUSDT': 'cardano',
+                'SOLUSDT': 'solana',
+                'PEPEUSDT': 'pepe',
+                'XRPUSDT': 'ripple',
+                'DOGEUSDT': 'dogecoin',
+                'TRXUSDT': 'tron',
+                'LINKUSDT': 'chainlink',
+                'XLMUSDT': 'stellar',
+                'XMRUSDT': 'monero',
+                'ZECUSDT': 'zcash'
+            }
+            
             # Convert symbols to CoinGecko IDs
             coin_ids = []
             for symbol in symbols:
-                if symbol in self.symbol_mapping:
-                    coin_ids.append(self.symbol_mapping[symbol])
+                if symbol in symbol_mapping:
+                    coin_ids.append(symbol_mapping[symbol])
+                else:
+                    # Try to use symbol directly (remove USDT suffix)
+                    coin_id = symbol.replace('USDT', '').lower()
+                    coin_ids.append(coin_id)
+            
+            # Join coin IDs for API call
+            ids_param = ','.join(coin_ids)
+            
+            # Use regular CoinGecko API (not Pro)
+            url = f"https://api.coingecko.com/api/v3/simple/price?ids={ids_param}&vs_currencies=usd"
+            
+            self.logger.info(f"🔄 Fetching data for {len(coin_ids)} coins from CoinGecko Simple API")
+            self.logger.info(f"🔄 URL: {url}")
+            
+            async with self.session.get(url, timeout=15) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    self.logger.info(f"🔄 Response: {data}")
                     
-            if not coin_ids:
-                return {}
-                
-            endpoint = f"{self.base_url}/coins/markets"
-            params = {
-                'vs_currency': 'usd',
-                'ids': ','.join(coin_ids),
-                'order': 'market_cap_desc',
-                'per_page': len(coin_ids),
-                'page': 1,
-                'sparkline': 'false',
-                'price_change_percentage': '24h'
-            }
-            
-            # Enhanced retry logic for rate limiting
-            # Pro API has better rate limits
-            max_attempts = 3 if self.pro_enabled else 2
-            base_delay = 2 if self.pro_enabled else 3
-            
-            for attempt in range(max_attempts):
-                try:
-                    self.logger.debug(f"CoinGecko market data attempt {attempt + 1}/{max_attempts}")
-            
-                    async with self.session.get(endpoint, params=params) as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            
-                            market_data = {}
-                            reverse_mapping = {v: k for k, v in self.symbol_mapping.items()}
-                            
-                            for coin in data:
-                                coin_id = coin['id']
-                                if coin_id in reverse_mapping:
-                                    symbol = reverse_mapping[coin_id]
-                                    
-                                    market_data[symbol] = {
-                                        'price': coin.get('current_price', 0),
-                                        'volume': coin.get('total_volume', 0),
-                                        'high_24h': coin.get('high_24h', 0),
-                                        'low_24h': coin.get('low_24h', 0),
-                                        'change_24h': coin.get('price_change_percentage_24h', 0) / 100 if coin.get('price_change_percentage_24h') else 0,
-                                        'market_cap': coin.get('market_cap', 0),
-                                        'market_cap_rank': coin.get('market_cap_rank', 0),
-                                        'circulating_supply': coin.get('circulating_supply', 0),
-                                        'total_supply': coin.get('total_supply', 0),
-                                        'timestamp': datetime.utcnow().isoformat(),
-                                        'source': 'coingecko_pro' if self.pro_enabled else 'coingecko'
-                                    }
-                                    
-                                    self.logger.info(f"✅ CoinGecko: Successfully fetched market data for {len(market_data)} symbols")
-                                    return market_data
-                                    
-                                elif response.status == 429:  # Rate limited
-                                    delay = base_delay * (1.5 ** attempt) if self.pro_enabled else base_delay * (2 ** attempt)
-                                    self.logger.warning(f"CoinGecko market data rate limited (attempt {attempt + 1}/{max_attempts}). Waiting {delay}s")
-                                    
-                                    if attempt < max_attempts - 1:
-                                        await asyncio.sleep(delay)
-                                        continue
-                                elif response.status == 401:
-                                    self.logger.error(f"CoinGecko API authentication failed (401) - check API key")
-                                    return {}
-                                else:
-                                    error_text = await response.text()
-                                    self.logger.error(f"CoinGecko market data API error: {response.status} - {error_text}")
-                                    return {}
-                                    
-                except asyncio.TimeoutError:
-                    self.logger.warning(f"CoinGecko market data timeout (attempt {attempt + 1})")
-                    if attempt < max_attempts - 1:
-                        await asyncio.sleep(base_delay)
-                        continue
-                except Exception as e:
-                    self.logger.error(f"CoinGecko market data error (attempt {attempt + 1}): {type(e).__name__}: {e}")
-                    if attempt < max_attempts - 1:
-                        await asyncio.sleep(base_delay)
-                        continue
+                    # Convert response to our format
+                    market_data = {}
+                    for symbol in symbols:
+                        coin_id = symbol_mapping.get(symbol, symbol.replace('USDT', '').lower())
                         
-            self.logger.error("CoinGecko market data: All attempts failed")
-            return {}
+                        if coin_id in data:
+                            coin_data = data[coin_id]
+                            usd_price = coin_data.get('usd', 0)
+                            
+                            market_data[symbol] = {
+                                'price': usd_price,
+                                'change_24h': 0.0,  # Simple API doesn't provide this
+                                'volume': 0,  # Simple API doesn't provide this
+                                'high_24h': usd_price,  # Estimate
+                                'low_24h': usd_price,   # Estimate
+                                'volume_change_24h': 0.0,  # Default
+                                'timestamp': datetime.utcnow().isoformat(),
+                                'source': 'coingecko_simple'
+                            }
+                    
+                    self.logger.info(f"✅ CoinGecko Simple API: {len(market_data)} symbols retrieved")
+                    return market_data
+                else:
+                    error_text = await response.text()
+                    self.logger.error(f"CoinGecko Simple API error: {response.status} - {error_text}")
+                    return {}
                     
         except Exception as e:
-            self.logger.error(f"Error fetching CoinGecko market data: {e}")
+            self.logger.error(f"CoinGecko Simple API failed: {e}")
             return {}
             
     async def get_trending_coins(self) -> List[Dict]:

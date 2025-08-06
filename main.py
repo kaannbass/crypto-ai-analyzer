@@ -34,6 +34,9 @@ except ImportError:
 app = Flask(__name__)
 analyzer_instance = None
 
+# Global analyzer instance for telegram bot access
+analyzer = None
+
 @app.route('/')
 def home():
     """Home endpoint."""
@@ -214,7 +217,7 @@ class CryptoAnalyzer:
             self.logger.error(f"Error loading existing data: {e}")
 
     async def get_market_data(self) -> Dict:
-        """Get market data with LIVE DATA ONLY - no fallback."""
+        """Get market data with LIVE DATA ONLY - NEVER return fake data."""
         try:
             # Import data manager
             from data_sources.data_manager import DataManager
@@ -223,32 +226,36 @@ class CryptoAnalyzer:
             # Force refresh to get fresh LIVE data only
             live_data = await data_manager.get_market_data(config.SYMBOLS, force_refresh=True)
             
-            if live_data and len(live_data) >= 1:  # At least 1 symbol with real data
-                self.logger.info(f"✅ Retrieved LIVE market data for {len(live_data)} symbols")
-                
-                # Verify data is actually live (not fallback)
-                real_data_count = sum(1 for data in live_data.values() 
-                                    if data.get('source') not in ['fallback', 'mock', 'default'])
-                
-                if real_data_count > 0:
-                    self.logger.info(f"✅ Confirmed {real_data_count} symbols have REAL data")
-                    # Save to file for web endpoint
-                    await self.save_market_data(live_data)
-                    
-                    # Check data quality
-                    quality = self._assess_data_quality(live_data)
-                    self.logger.info(f"📊 Data quality assessment: {quality}")
-                    
-                    return live_data
-                else:
-                    self.logger.error("❌ All data is fallback/mock - rejecting dataset")
-                    return {}
-            else:
-                self.logger.error("❌ NO LIVE DATA AVAILABLE - All sources failed")
+            if not live_data:
+                self.logger.error("❌ NO LIVE DATA AVAILABLE - System will NOT proceed")
+                self.logger.error("📍 Please check:")
+                self.logger.error("   1. Internet connection")
+                self.logger.error("   2. VPN if APIs are blocked")
+                self.logger.error("   3. API keys configuration")
                 return {}
-                
+            
+            # Verify ALL data is real (not fallback/mock/default)
+            real_data_count = sum(1 for data in live_data.values() 
+                                if data.get('source') not in ['fallback', 'mock', 'default'])
+            
+            if real_data_count == 0:
+                self.logger.error("❌ ALL DATA IS FAKE/FALLBACK - REJECTING COMPLETELY")
+                self.logger.error("📍 System will NOT proceed with fake data")
+                return {}
+            
+            if real_data_count < len(live_data):
+                fake_count = len(live_data) - real_data_count
+                self.logger.warning(f"⚠️ {fake_count} symbols have fake data - removing them")
+                # Remove fake data entries
+                filtered_data = {symbol: data for symbol, data in live_data.items() 
+                               if data.get('source') not in ['fallback', 'mock', 'default']}
+                live_data = filtered_data
+            
+            self.logger.info(f"✅ Retrieved {len(live_data)} symbols with REAL data only")
+            return live_data
+            
         except Exception as e:
-            self.logger.error(f"❌ Error fetching market data: {e}")
+            self.logger.error(f"Error getting market data: {e}")
             return {}
     
     def _assess_data_quality(self, data: Dict) -> str:
@@ -361,19 +368,20 @@ class CryptoAnalyzer:
         # Get market data (LIVE ONLY)
         market_data = await self.get_market_data()
         
-        # If NO LIVE DATA AT ALL, skip analysis completely
+        # If NO REAL DATA AT ALL, completely abort analysis
         if not market_data:
-            self.logger.error("❌ NO LIVE DATA AVAILABLE - Skipping ALL analysis operations")
-            self.logger.error("📍 System will wait for next cycle - no trading signals will be generated")
+            self.logger.error("❌ NO REAL DATA AVAILABLE - ABORTING ALL ANALYSIS")
+            self.logger.error("📍 System will NOT generate any signals or analysis")
+            self.logger.error("📍 Please fix data sources and restart")
             
             # Send notification about data unavailability
             if TELEGRAM_AVAILABLE and self.telegram_notifier:
                 try:
                     no_data_msg = (
-                        "⚠️ <b>Veri Uyarısı</b>\n\n"
-                        "❌ Canlı piyasa verilerine erişilemiyor\n"
-                        "🔄 Sistem bir sonraki döngüyü bekliyor\n\n"
-                        "📍 <b>Olası çözümler:</b>\n"
+                        "🚫 <b>GERÇEK VERİ YOK</b>\n\n"
+                        "❌ Hiç gerçek piyasa verisi bulunamadı\n"
+                        "🔄 Sistem fake veri KULLANMIYOR\n\n"
+                        "📍 <b>Çözümler:</b>\n"
                         "• VPN kullanın\n"
                         "• İnternet bağlantısını kontrol edin\n"
                         "• API anahtarlarını doğrulayın\n\n"
@@ -1012,13 +1020,172 @@ class CryptoAnalyzer:
             except Exception as e:
                 self.logger.error(f"Error disconnecting WebSocket: {e}")
 
+    async def get_latest_signals(self) -> str:
+        """Get latest trading signals from REAL data."""
+        try:
+            # Load latest signals from file
+            signals_file = os.path.join(config.DATA_DIR, 'signals.json')
+            if os.path.exists(signals_file):
+                with open(signals_file, 'r') as f:
+                    signals_data = json.load(f)
+                
+                if signals_data and len(signals_data) > 0:
+                    # Get last 5 signals
+                    latest_signals = signals_data[-5:]
+                    
+                    message = "🎯 <b>Latest Trading Signals</b>\n\n"
+                    for signal in latest_signals:
+                        symbol = signal.get('symbol', 'Unknown')
+                        action = signal.get('action', 'WAIT')
+                        confidence = signal.get('confidence', 0)
+                        reason = signal.get('reason', 'No reason provided')
+                        
+                        emoji = "🟢" if action == "BUY" else "🔴" if action == "SELL" else "🟡"
+                        message += f"{emoji} <b>{symbol}</b>: {action} ({confidence:.2f})\n"
+                        message += f"   📝 {reason}\n\n"
+                    
+                    return message
+            
+            return "🎯 <b>Latest Trading Signals</b>\n\n❌ No real signals available at the moment."
+            
+        except Exception as e:
+            return f"🎯 <b>Latest Trading Signals</b>\n\n❌ Error: {str(e)}"
+
+    async def get_market_overview(self) -> str:
+        """Get current market overview from REAL data."""
+        try:
+            # Get current market data
+            market_data = await self.get_market_data()
+            
+            if not market_data:
+                return "📈 <b>Current Market Overview</b>\n\n❌ No real market data available at the moment."
+            
+            # Calculate statistics
+            total_symbols = len(market_data)
+            positive_changes = sum(1 for data in market_data.values() if data.get('change_24h', 0) > 0)
+            negative_changes = sum(1 for data in market_data.values() if data.get('change_24h', 0) < 0)
+            
+            # Get top gainers and losers
+            sorted_by_change = sorted(market_data.items(), key=lambda x: x[1].get('change_24h', 0), reverse=True)
+            top_gainers = sorted_by_change[:3]
+            top_losers = sorted_by_change[-3:]
+            
+            message = "📈 <b>Current Market Overview</b>\n\n"
+            message += f"📊 <b>Market Summary:</b>\n"
+            message += f"• Total Symbols: {total_symbols}\n"
+            message += f"• Positive: {positive_changes} 🟢\n"
+            message += f"• Negative: {negative_changes} 🔴\n"
+            message += f"• Neutral: {total_symbols - positive_changes - negative_changes} 🟡\n\n"
+            
+            message += "🏆 <b>Top Gainers:</b>\n"
+            for symbol, data in top_gainers:
+                change = data.get('change_24h', 0) * 100
+                price = data.get('price', 0)
+                message += f"• {symbol}: ${price:,.2f} (+{change:.2f}%)\n"
+            
+            message += "\n📉 <b>Top Losers:</b>\n"
+            for symbol, data in top_losers:
+                change = data.get('change_24h', 0) * 100
+                price = data.get('price', 0)
+                message += f"• {symbol}: ${price:,.2f} ({change:.2f}%)\n"
+            
+            return message
+            
+        except Exception as e:
+            return f"📈 <b>Current Market Overview</b>\n\n❌ Error: {str(e)}"
+
+    async def perform_symbol_analysis(self, symbol: str) -> str:
+        """Perform detailed analysis for a specific symbol using REAL data."""
+        try:
+            # Get current market data
+            market_data = await self.get_market_data()
+            
+            if not market_data or symbol not in market_data:
+                return f"🧠 <b>Analysis for {symbol}</b>\n\n❌ No real data available for {symbol}."
+            
+            data = market_data[symbol]
+            price = data.get('price', 0)
+            change_24h = data.get('change_24h', 0) * 100
+            volume = data.get('volume', 0)
+            high_24h = data.get('high_24h', 0)
+            low_24h = data.get('low_24h', 0)
+            source = data.get('source', 'Unknown')
+            
+            message = f"🧠 <b>Analysis for {symbol}</b>\n\n"
+            message += f"💰 <b>Price Data:</b>\n"
+            message += f"• Current Price: ${price:,.2f}\n"
+            message += f"• 24h Change: {change_24h:+.2f}%\n"
+            message += f"• 24h High: ${high_24h:,.2f}\n"
+            message += f"• 24h Low: ${low_24h:,.2f}\n"
+            message += f"• Volume: {volume:,.0f}\n\n"
+            
+            message += f"📊 <b>Technical Analysis:</b>\n"
+            message += f"• Data Source: {source}\n"
+            message += f"• Trend: {'🟢 Bullish' if change_24h > 0 else '🔴 Bearish' if change_24h < 0 else '🟡 Neutral'}\n"
+            
+            # Add AI analysis if available
+            try:
+                from llm.aggregator import AIAggregator
+                aggregator = AIAggregator()
+                analysis = await aggregator.analyze_single_crypto(symbol, data)
+                
+                if analysis and 'signals' in analysis:
+                    signals = analysis['signals']
+                    if signals:
+                        signal = signals[0]  # Get first signal
+                        action = signal.get('action', 'WAIT')
+                        confidence = signal.get('confidence', 0)
+                        reason = signal.get('reason', 'No AI analysis available')
+                        
+                        message += f"• AI Signal: {action} ({confidence:.2f})\n"
+                        message += f"• AI Reason: {reason}\n"
+            except Exception as e:
+                message += f"• AI Analysis: Not available ({str(e)})\n"
+            
+            return message
+            
+        except Exception as e:
+            return f"🧠 <b>Analysis for {symbol}</b>\n\n❌ Error: {str(e)}"
+
+    async def get_performance_stats(self) -> str:
+        """Get performance statistics from REAL data."""
+        try:
+            # Load signals from file
+            signals_file = os.path.join(config.DATA_DIR, 'signals.json')
+            if os.path.exists(signals_file):
+                with open(signals_file, 'r') as f:
+                    signals_data = json.load(f)
+                
+                if signals_data:
+                    total_signals = len(signals_data)
+                    buy_signals = sum(1 for s in signals_data if s.get('action') == 'BUY')
+                    sell_signals = sum(1 for s in signals_data if s.get('action') == 'SELL')
+                    wait_signals = sum(1 for s in signals_data if s.get('action') == 'WAIT')
+                    
+                    avg_confidence = sum(s.get('confidence', 0) for s in signals_data) / total_signals if total_signals > 0 else 0
+                    
+                    message = "📈 <b>Performance Statistics</b>\n\n"
+                    message += f"• Total Signals: {total_signals}\n"
+                    message += f"• Buy Signals: {buy_signals} 🟢\n"
+                    message += f"• Sell Signals: {sell_signals} 🔴\n"
+                    message += f"• Wait Signals: {wait_signals} 🟡\n"
+                    message += f"• Average Confidence: {avg_confidence:.2f}\n"
+                    
+                    return message
+            
+            return "📈 <b>Performance Statistics</b>\n\n❌ No real performance data available at the moment."
+            
+        except Exception as e:
+            return f"📈 <b>Performance Statistics</b>\n\n❌ Error: {str(e)}"
+
 
 def run_scheduler_background():
     """Run the scheduler in background thread for Render."""
-    global analyzer_instance
+    global analyzer_instance, analyzer
     
     async def scheduler_main():
         analyzer_instance = CryptoAnalyzer()
+        analyzer = analyzer_instance  # Set global instance for telegram bot
         await analyzer_instance.run_scheduler()
     
     # Run in new event loop for background thread
@@ -1028,8 +1195,9 @@ def run_scheduler_background():
 
 async def main():
     """Main entry point for local development."""
-    global analyzer_instance
+    global analyzer_instance, analyzer
     analyzer_instance = CryptoAnalyzer()
+    analyzer = analyzer_instance  # Set global instance for telegram bot
     await analyzer_instance.run_scheduler()
 
 # Render.com entry point
